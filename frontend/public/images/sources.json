@@ -1,0 +1,50 @@
+{
+  "verifiedOn": "2026-11-20",
+  "purpose": "TasteAI 本地 Demo 网页摄影展示，不用于数据集或模型训练",
+  "verification": "授权调研逐一查看 Unsplash 图片页面，页面均标注 Free to use under the Unsplash License；嵌入元数据 premium:false、plus:false。下载后的三张图片已实际查看并核对菜品。主代理复查 license/terms 的 WebFetch 返回 401，因此未将该次抓取作为成功证据。",
+  "licenseUrl": "https://unsplash.com/license",
+  "termsUrl": "https://unsplash.com/terms",
+  "licenseNotes": [
+    "免费 Unsplash License，非 CC0，非 Unsplash Plus。许可允许下载、修改及商业网站展示，署名非强制但本项目保留署名。",
+    "不得出售基本未修改的图片副本，不得聚合为竞争图库服务。",
+    "按本次条款调研结果，禁止用于 AI/ML 训练或数据集；本项目仅作展示资产。",
+    "照片不构成摄影作者对本项目或菜谱的背书。没有使用参考图的裁切素材。"
+  ],
+  "assets": [
+    {
+      "file": "salmon-bowl.webp",
+      "author": "David Foodphototasty",
+      "sourceUrl": "https://unsplash.com/photos/green-and-orange-vegetable-on-white-ceramic-bowl-Sekm9_nC2BM",
+      "downloadUrl": "https://images.unsplash.com/photo-1602881917445-0b1ba001addf?ixlib=rb-4.1.0&auto=format&fit=max&w=1600&q=88",
+      "originalDimensions": [5304, 5304],
+      "localDimensions": [1600, 1600],
+      "description": "浅粉桌面上的三文鱼、黄瓜、毛豆、海藻、海苔与米饭碗。鱼肉呈生食状态，菜谱明确即食选择、风险及熟食替代。",
+      "modifications": "CDN 缩小至 1600px，本地 Pillow 转 WebP quality=85；网页 object-fit 构图裁切。"
+    },
+    {
+      "file": "lemon-chicken.webp",
+      "author": "Mark DeYoung",
+      "sourceUrl": "https://unsplash.com/photos/cooked-dish-mjcJ0FFgdWI",
+      "downloadUrl": "https://images.unsplash.com/photo-1532550907401-a500c9a57435?ixlib=rb-4.1.0&auto=format&fit=max&w=1600&q=88",
+      "originalDimensions": [6016, 4016],
+      "localDimensions": [1600, 1068],
+      "description": "木色圆盘上的 Lemon Chicken，配柠檬、迷迭香、胡萝卜、四季豆、彩椒与瓜类。",
+      "modifications": "CDN 缩小至 1600px，本地 Pillow 转 WebP quality=85；网页 object-fit 构图裁切。"
+    },
+    {
+      "file": "tomato-fusilli.webp",
+      "author": "Aleksandra Tanasiienko",
+      "sourceUrl": "https://unsplash.com/photos/pasta-with-sauce-on-white-ceramic-plate-0y6eMd8vevA",
+      "downloadUrl": "https://images.unsplash.com/photo-1608897013039-887f21d8c804?ixlib=rb-4.1.0&auto=format&fit=max&w=1600&q=88",
+      "originalDimensions": [3755, 5570],
+      "localDimensions": [1214, 1800],
+      "description": "白盘里的番茄螺旋面、圣女果与罗勒，白色木桌上有平底锅和面包。",
+      "modifications": "CDN 缩小后本地等比例限制最长边 1800px，Pillow 转 WebP quality=85；网页 object-fit 构图裁切。"
+    }
+  ],
+  "otherAssets": {
+    "icons": "本项目统一手绘 24px viewBox、1.6px 线宽 SVG 功能图标，无外部图标包。",
+    "favicon": "保留 Day 0 本地原创 favicon.svg。",
+    "recipes": "本项目独立编写的本地 Demo 示例配方，未复制图片页面或作者的菜谱；图片仅作摆盘参考。"
+  }
+}
