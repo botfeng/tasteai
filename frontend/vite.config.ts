@@ -1,9 +1,10 @@
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vitest/config'
+import { loadEnv } from 'vite'
 
 const proxy = {
-  '/api': 'http://127.0.0.1:8000',
+  '/api': loadEnv('development', '.', 'TASTEAI_').TASTEAI_API_TARGET || 'http://127.0.0.1:8000',
 }
 
 export default defineConfig({

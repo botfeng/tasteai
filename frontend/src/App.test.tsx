@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
-import { emptyPreferences, matchingRecipes, storageKey } from './data/preferences'
+import { emptyPreferences, storageKey } from './data/preferences'
+import { recommendByPreference } from './data/recommendations'
 import { recipes } from './data/recipes'
 
 beforeEach(() => {
@@ -31,7 +32,8 @@ describe('TasteAI recipe experience', () => {
     expect(screen.getByRole('link', { name: /看看做法/ })).toHaveAttribute('href', `#recipe/${recipes[0].id}`)
     expect(screen.getByText('本地 Demo 菜谱 · 非模型推荐')).toBeVisible()
     expect(screen.queryByText(/工程初始化/)).not.toBeInTheDocument()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledWith('/api/recommendations/status', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(fetchMock.mock.calls.every(([url]) => url !== '/api/recommendations/generate')).toBe(true)
   })
 
   it('rotates the main dish without claiming to fetch new recipes', () => {
@@ -41,6 +43,38 @@ describe('TasteAI recipe experience', () => {
     fireEvent.click(screen.getByRole('button', { name: '换一批' }))
     expect(within(featured).getByRole('heading')).toHaveTextContent(recipes[1].name)
     expect(screen.getByRole('status')).toHaveTextContent(`${recipes.length} 道匹配的 Demo 菜谱`)
+  })
+
+  it('browses all fifteen curated dishes while retaining one hero and two cards', () => {
+    const { container } = render(<App />)
+    const seen = new Set<string>()
+    for (let index = 0; index < recipes.length; index += 1) {
+      const featured = screen.getByRole('article', { name: '今日主推菜谱' })
+      seen.add(within(featured).getByRole('heading').textContent!)
+      expect(container.querySelectorAll('.featured-card')).toHaveLength(1)
+      expect(container.querySelectorAll('.more-grid .recipe-card')).toHaveLength(2)
+      expect(container.querySelector('img[src=""]')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: '换一批' }))
+    }
+    expect(seen).toEqual(new Set(recipes.map((recipe) => recipe.name)))
+    expect(seen.size).toBe(15)
+    expect(container.querySelectorAll('.photo-credits a')).toHaveLength(6)
+  })
+
+  it('saves an original-placeholder recipe and restores its full local detail', () => {
+    const recipe = recipes[3]
+    const view = render(<App />)
+    navigate(`#recipe/${recipe.id}`)
+    expect(screen.getByRole('img', { name: recipe.photoAlt })).toBeVisible()
+    expect(screen.getByText(/分类插画是项目原创占位视觉/)).toBeVisible()
+    fireEvent.click(screen.getAllByRole('button', { name: `收藏${recipe.name}` })[0])
+    view.unmount()
+    render(<App />)
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(recipe.name)
+    expect(screen.getAllByRole('checkbox')).toHaveLength(recipe.ingredients.length)
+    expect(screen.getAllByRole('button', { name: `取消收藏${recipe.name}` })[0]).toHaveAttribute('aria-pressed', 'true')
+    navigate('#saved')
+    expect(screen.getByRole('heading', { name: recipe.name })).toBeVisible()
   })
 
   it('opens a recipe by its CTA and exposes ingredients and complete cooking steps', async () => {
@@ -113,7 +147,7 @@ describe('TasteAI recipe experience', () => {
     const stored = JSON.parse(localStorage.getItem(storageKey)!)
     expect(stored.preferences).toEqual({ tastes: ['清爽', '浓郁'], ingredients: ['蔬菜'], maxMinutes: 30, configured: true })
     expect(screen.getByText(/按口味档案筛选/)).toBeVisible()
-    for (const recipe of matchingRecipes(stored.preferences)) expect(screen.getByRole('heading', { name: recipe.name })).toBeVisible()
+    for (const { recipe } of recommendByPreference(recipes, { mode: 'cook', preferences: stored.preferences }).slice(0, 3)) expect(screen.getByRole('heading', { name: recipe.name })).toBeVisible()
   })
 
   it('does not save an incomplete draft when skipping', async () => {
@@ -143,7 +177,7 @@ describe('TasteAI recipe experience', () => {
     expect(localStorage.getItem(storageKey)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /15 分钟快手/ }))
     expect(screen.getByRole('button', { name: /15 分钟快手/ })).toHaveAttribute('aria-pressed', 'false')
-    for (const recipe of recipes) expect(screen.getByRole('heading', { name: recipe.name })).toBeVisible()
+    for (const recipe of recipes.slice(0, 3)) expect(screen.getByRole('heading', { name: recipe.name })).toBeVisible()
   })
 
   it('combines the taste segment with the independent time toggle in either order', () => {
@@ -176,7 +210,7 @@ describe('TasteAI recipe experience', () => {
     fireEvent.click(screen.getByRole('button', { name: /查看全部菜谱/ }))
     expect(screen.getByRole('radio', { name: '全部' })).toBeChecked()
     expect(screen.getByRole('button', { name: '15 分钟快手' })).toHaveAttribute('aria-pressed', 'false')
-    for (const recipe of recipes) expect(screen.getByRole('heading', { name: recipe.name })).toBeVisible()
+    for (const recipe of recipes.slice(0, 3)) expect(screen.getByRole('heading', { name: recipe.name })).toBeVisible()
   })
 
   it('keeps saved preferences authoritative and resets rotation when a quick filter changes', () => {
@@ -201,10 +235,10 @@ describe('TasteAI recipe experience', () => {
   it('keeps navigation semantics and opens the existing preference flow from the compact entry', async () => {
     render(<App />)
     const navigation = screen.getByRole('navigation', { name: '主导航' })
-    expect(within(navigation).getByRole('link', { name: '今日推荐' })).toHaveAttribute('aria-current', 'page')
+    expect(within(navigation).getByRole('link', { name: '今天吃什么' })).toHaveAttribute('aria-current', 'page')
     fireEvent.click(within(navigation).getByRole('link', { name: '我的收藏' }))
     await waitFor(() => expect(within(navigation).getByRole('link', { name: '我的收藏' })).toHaveAttribute('aria-current', 'page'))
-    fireEvent.click(within(navigation).getByRole('link', { name: '今日推荐' }))
+    fireEvent.click(within(navigation).getByRole('link', { name: '今天吃什么' }))
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('今天，吃点喜欢的。'))
     fireEvent.click(screen.getByRole('radio', { name: '浓郁' }))
     fireEvent.click(screen.getByRole('button', { name: '15 分钟快手' }))

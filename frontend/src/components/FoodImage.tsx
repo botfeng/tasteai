@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import Icon from './Icon'
 
-export default function FoodImage({ src, alt, className = '', priority = false }: {
+export default function FoodImage({ src, alt, className = '', priority = false, category }: {
   src: string
   alt: string
   className?: string
   priority?: boolean
+  category?: string
 }) {
   const [failed, setFailed] = useState(false)
   const [loaded, setLoaded] = useState(false)
+
+  if (category) return <div className={`food-image generated-cover cover-${category} ${className}`} role="img" aria-label={alt || '分类插画占位，非实物照片'}><div className="cover-orbit"><Icon name={category === 'vegetable' ? 'leaf' : category === 'protein' ? 'chef' : 'bowl'} size={60} /></div><span>一餐新灵感</span><small>分类插画 · 非实物照片</small></div>
 
   return (
     <div className={`food-image ${className} ${loaded ? 'is-loaded' : ''}`}>
