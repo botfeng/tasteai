@@ -23,12 +23,17 @@ class Settings:
     max_concurrent: int = 2
     max_ip_entries: int = 512
     invalid_environment: bool = False
+    photo_api_key: str = field(default="", repr=False)
+    photo_timeout_seconds: float = 6.0
+    photo_hourly_limit: int = 60
+    photo_daily_limit: int = 180
+    photo_proxy: str = ""
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None):
         env = os.environ if env is None else env
         try:
-            return cls(
+            base = cls(
                 mode=env.get("LLM_MODE", "disabled"),
                 provider=env.get("LLM_PROVIDER", "generic"),
                 base_url=env.get("LLM_BASE_URL", "").strip(),
@@ -46,6 +51,16 @@ class Settings:
             )
         except (AttributeError, TypeError, ValueError, OverflowError):
             return cls(invalid_environment=True)
+        # Photo settings fail closed on their own; they must never disable recommendations.
+        try:
+            return cls(**{**base.__dict__,
+                          "photo_api_key": env.get("PHOTO_API_KEY", "").strip(),
+                          "photo_timeout_seconds": float(env.get("PHOTO_TIMEOUT_SECONDS", "6")),
+                          "photo_hourly_limit": int(env.get("PHOTO_HOUR_LIMIT", "60")),
+                          "photo_daily_limit": int(env.get("PHOTO_DAY_LIMIT", "180")),
+                          "photo_proxy": env.get("PHOTO_PROXY", "").strip()})
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            return base
 
     def configuration_error(self) -> str | None:
         if self.invalid_environment or self.mode not in {"disabled", "mock", "openai_compatible"}:
@@ -98,3 +113,25 @@ class Settings:
     @property
     def configured(self) -> bool:
         return self.mode != "disabled" and self.configuration_error() is None
+
+    @property
+    def photo_configured(self) -> bool:
+        # Openverse anonymous search needs no key; an optional key adds Bearer auth.
+        if self.invalid_environment or not (1 <= self.photo_timeout_seconds <= 30):
+            return False
+        if not (1 <= self.photo_hourly_limit <= 200 and 1 <= self.photo_daily_limit <= 1000):
+            return False
+        if any(char.isspace() for char in self.photo_api_key):
+            return False
+        if self.photo_proxy:
+            try:
+                url = urlsplit(self.photo_proxy)
+                _ = url.port
+            except ValueError:
+                return False
+            if (url.scheme not in {"http", "https"} or not url.hostname
+                    or url.username is not None or url.password is not None
+                    or url.query or url.fragment or "\\" in self.photo_proxy
+                    or any(char.isspace() for char in self.photo_proxy)):
+                return False
+        return True

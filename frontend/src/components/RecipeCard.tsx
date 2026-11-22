@@ -28,7 +28,7 @@ export default function RecipeCard({ recipe, saved, onToggle, mode = 'cook', rea
     <article className="recipe-card">
       <div className="recipe-card-visual">
         <a href={href} tabIndex={-1} aria-hidden="true">
-          <FoodImage src={recipe.image} alt="" category={recipe.generation?.recipe.imageFallbackCategory ?? recipe.imageFallbackCategory} />
+          <FoodImage src={recipe.image} alt="" category={recipe.generation?.recipe.imageFallbackCategory ?? recipe.imageFallbackCategory} illustrative={!!recipe.generation?.photo} />
         </a>
         <SaveButton recipe={recipe} saved={saved} onToggle={onToggle} />
       </div>

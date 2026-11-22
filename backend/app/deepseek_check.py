@@ -48,7 +48,7 @@ async def check_once(settings: Settings, report_path: Path, transport=None) -> b
                 "oneToThreeRecipes": 1 <= len(result.recipes) <= 3,
                 "onlySelectedMains": main_ids <= set(REQUEST.ingredientIds),
                 "onlyAllowedIngredients": all(item.ingredientId in allowed_ids for recipe in result.recipes for item in recipe.ingredients),
-                "actionableSteps": all(len(recipe.cookingSteps) >= 3 for recipe in result.recipes),
+                "actionableSteps": all(len(recipe.cookingSteps) >= 1 for recipe in result.recipes),
                 "modelReported": bool(attempts and attempts[0]["responseModel"]),
                 "usageReported": bool(attempts and {"prompt_tokens", "completion_tokens", "total_tokens"}
                                       <= (attempts[0]["usage"] or {}).keys()),

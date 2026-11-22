@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from app.catalog import BASIC_IDS, BY_ID
 from app.errors import RecommendationError
 from app.schemas import RecommendationRequest
-from app.validation import food_ids, supported_preferences
+from app.validation import supported_preferences
 
 
 @dataclass(frozen=True)
@@ -101,19 +101,16 @@ class MockClient:
             minutes = template.minutes + 2 * (request.servings - 1)
             if request.timeLimit is not None and minutes > request.timeLimit:
                 continue
-            ingredients = [{"ingredientId": key, "name": BY_ID[key].name, "amount": f"{amount * request.servings}{unit}",
-                            "role": BY_ID[key].role} for key, amount, unit in amounts]
+            ingredients = [{"ingredientId": key, "amount": f"{amount * request.servings}{unit}"}
+                           for key, amount, unit in amounts]
             ids = {item["ingredientId"] for item in ingredients}
-            steps = [{"title": title, "body": body, "ingredientIds": sorted(food_ids(title + body) & ids)}
-                     for title, body in template.steps]
+            steps = [body for _, body in template.steps]
             if extras:
                 names = "、".join(BY_ID[key].name for key, _, _ in extras)
-                steps.append({"title": "调味装盘", "body": f"将{names}按整份用量加入做好的食材，轻轻拌匀1分钟后装盘。",
-                              "ingredientIds": [key for key, _, _ in extras]})
+                steps.append(f"将{names}按整份用量加入做好的食材，轻轻拌匀1分钟后装盘。")
             # Explicit fixed water allocations scale with the requested batch, too.
             if request.servings > 1:
-                for step in steps:
-                    step["body"] = step["body"].replace("100毫升", f"{100 * request.servings}毫升")
+                steps = [body.replace("100毫升", f"{100 * request.servings}毫升") for body in steps]
             dining = request.scene == "eat_out"
             tip = "先向商家确认实际食材、份量与供应情况，再按人数点单。"
             if request.budgetLevel == "economy":
@@ -122,22 +119,20 @@ class MockClient:
                 tip = "按食量选择组合，先确认供应与计费方式，不承诺实际花费。"
             elif request.budgetLevel == "balanced":
                 tip = "先按人数确认份量，再决定单点或组合，避免重复加配。"
-            candidates.append({
+            candidates.append(({
                 "name": template.name, "description": ("通用点单搭配参考：" if dining else "") + template.description,
-                "ingredients": ingredients, "cookingSteps": [] if dining else steps,
+                "ingredients": ingredients, "steps": [] if dining else steps,
                 "estimatedTime": None if dining else minutes,
-                "recommendationReason": "根据已声明食材提供搭配参考。", "missingIngredients": [],
                 "imageFallbackCategory": template.category,
                 "diningCategory": ("面食小馆" if template.category == "noodles" else "家常菜") if dining else None,
                 "orderingTip": tip if dining else None,
-                "matchedPreferences": sorted(requested & supported_preferences(ids)),
-            })
+            }, sorted(requested & supported_preferences(ids))))
         # Rank useful matches first; alternate subsets from ten genuinely different recipes.
-        candidates.sort(key=lambda item: (request.todayTaste in item["matchedPreferences"] if request.todayTaste else False,
-                                          len(item["matchedPreferences"])), reverse=True)
+        candidates.sort(key=lambda item: (request.todayTaste in item[1] if request.todayTaste else False,
+                                          len(item[1])), reverse=True)
         if len(candidates) < 3 and request.scene != "fridge":
             raise RecommendationError("mock_constraints_unsupported", "演示食谱暂不能满足这些条件，请放宽用时等选项；未调用真实 AI。", 422)
         offset = (self.generation * 3) % len(candidates) if candidates else 0
         selected = (candidates[offset:] + candidates[:offset])[:3]
         self.generation += 1
-        return json.dumps({"recipes": selected}, ensure_ascii=False)
+        return json.dumps({"recipes": [recipe for recipe, _ in selected]}, ensure_ascii=False)

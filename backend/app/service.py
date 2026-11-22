@@ -9,7 +9,7 @@ from app.limiter import LocalLimiter
 from app.mock import MockClient
 from app.schemas import RecommendationRequest, RecommendationResponse, RecommendationStatus
 from app.settings import Settings
-from app.validation import QUALITY_MESSAGES, quality_review, validate_output
+from app.validation import amount_consistency_warnings, validate_output
 
 
 class RecommendationService:
@@ -85,15 +85,14 @@ class RecommendationService:
             else:
                 raise AssertionError("bounded generation loop")
         mock = self.settings.mode == "mock"
-        warnings = ["仅供本地演示；结构与关键词校验不能保证全部烹饪语义，仍需人工复核。",
+        warnings = ["仅供本地演示；结构校验不能保证全部烹饪语义，仍需人工复核。",
                     "食材用量是整份烹饪或点单参考，不是营养估算；用时会随设备和份量变化。"]
         if rejected:
             reasons = "；".join(f"原第{error.field_path[1] + 1}道：{error.code}" for error in rejected)
             warnings.append(f"已淘汰{len(rejected)}道未通过校验的候选（{reasons}），仅展示通过校验的{len(recipes)}道。")
         for index, recipe in enumerate(recipes, start=1):
-            issues = quality_review(recipe)
-            if issues:
-                warnings.append(f"第{index}道候选待人工复核：{recipe.name}。" + "；".join(QUALITY_MESSAGES[code] for code in issues))
+            for warning in amount_consistency_warnings(recipe):
+                warnings.append(f"第{index}道 {recipe.name}：{warning}")
         if request.scene == "fridge":
             warnings.append("严格模式不补充未选主食材；未选非基础调料须明确列为缺少，烹饪前请补齐。" if request.strictIngredients
                             else "允许建议缺少的食材，但仍须包含已选主食材；烹饪前请核对缺少清单。")

@@ -473,15 +473,16 @@ def test_max_recipes_is_a_hard_validation_and_service_limit(scene, maximum, coun
 
 @pytest.mark.parametrize("scene", ["cook", "eat_out", "fridge"])
 @pytest.mark.parametrize("count", [0, 1, 2])
-def test_only_fridge_allows_fewer_than_three_recipes(scene, count):
+def test_only_fridge_allows_an_empty_batch(scene, count):
     request = scene_request(scene)
     raw = raw_candidates(request, count)
     transport, calls = recorded_transport(lambda _: httpx.Response(200, json=envelope(raw)))
     service = service_for(transport)
-    if scene == "fridge":
+    if count >= 1 or scene == "fridge":
         result = asyncio.run(service.generate(request, "test"))
         assert result.source == "ai" and len(result.recipes) == count
-        assert f"{count}道" in result.notice
+        if scene == "fridge":
+            assert f"{count}道" in result.notice
     else:
         with pytest.raises(RecommendationError, match="invalid_model_output"):
             asyncio.run(service.generate(request, "test"))
@@ -549,10 +550,9 @@ def test_check_once_success_reserves_report_and_forces_limits(tmp_path, monkeypa
 def test_check_once_rejects_additional_seasoning_without_display_or_retry(tmp_path):
     data = json.loads(raw_candidates())
     recipe = data["recipes"][0]
-    extra = {"ingredientId": "soy-sauce", "name": "酱油", "amount": "5毫升", "role": "seasoning"}
+    extra = {"ingredientId": "soy-sauce", "amount": "5毫升"}
     recipe["ingredients"].append(extra)
-    recipe["missingIngredients"].append(dict(extra))
-    recipe["cookingSteps"].append({"title": "补充调味", "body": "将酱油加入做好的食材，轻轻拌匀1分钟后装盘。", "ingredientIds": ["soy-sauce"]})
+    recipe["steps"].append("将5毫升酱油加入做好的食材，轻轻拌匀1分钟后装盘。")
     raw = json.dumps(data, ensure_ascii=False)
     assert len(validate_output(raw, REQUEST)) == 3
     transport, calls = recorded_transport(lambda _: httpx.Response(200, json=envelope(raw)))

@@ -1,7 +1,7 @@
 import { recipes } from './recipes'
 import type { Recipe } from './recipes'
 import type { IconName } from '../components/Icon'
-import { validSnapshot } from './generation'
+import { validPhoto, validSnapshot } from './generation'
 import type { GeneratedSnapshot } from './generation'
 
 export const tasteOptions: { label: string; description: string; icon: IconName }[] = [
@@ -34,13 +34,20 @@ export type DemoState = { preferences: Preferences; saved: string[]; generatedSn
 export const storageKey = 'tasteai-demo-v1'
 export const emptyPreferences = (): Preferences => ({ tastes: [], ingredients: [], maxMinutes: 0, configured: false })
 
+// Old-source (e.g. Pexels) photos fail validPhoto; keep the favorite, drop only the photo.
+const stripInvalidPhoto = (item: unknown): unknown => {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return item
+  const record = item as Record<string, unknown>
+  return record.photo !== undefined && !validPhoto(record.photo) ? { ...record, photo: undefined } : item
+}
+
 export function readDemoState(): DemoState {
   const fallback = { preferences: emptyPreferences(), saved: [] }
   try {
     const value: unknown = JSON.parse(localStorage.getItem(storageKey) ?? 'null')
     if (!value || typeof value !== 'object') return fallback
     const stored = value as Record<string, unknown>
-    const generatedSnapshots = Array.isArray(stored.generatedSnapshots) ? stored.generatedSnapshots.filter(validSnapshot).slice(0, 100) : []
+    const generatedSnapshots = Array.isArray(stored.generatedSnapshots) ? stored.generatedSnapshots.map(stripInvalidPhoto).filter(validSnapshot).slice(0, 100) : []
     const saved = Array.isArray(stored.saved)
       ? [...new Set(stored.saved.filter((id): id is string => typeof id === 'string' && (recipes.some((recipe) => recipe.id === id) || generatedSnapshots.some((item) => item.recipe.id === id))))]
       : []

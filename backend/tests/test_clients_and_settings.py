@@ -42,20 +42,20 @@ def test_adapter_payload_format_and_no_secret_in_prompts(response_format):
             assert schema["strict"] is True
             assert schema["schema"] == ModelOutput.model_json_schema()
             assert schema["schema"]["additionalProperties"] is False
-            candidate = schema["schema"]["$defs"]["CandidateRecipe"]
+            candidate = schema["schema"]["$defs"]["ModelRecipe"]
             assert set(candidate["required"]) == set(candidate["properties"])
         else:
             assert body["response_format"] == {"type": "json_object"}
-        assert "V2" in body["messages"][0]["content"]
+        assert "V3" in body["messages"][0]["content"]
         assert "timeLimit" in body["messages"][0]["content"]
         assert all(level not in body["messages"][0]["content"] for level in ("economy", "balanced", "treat"))
         prompt = json.loads(body["messages"][1]["content"])
         assert prompt["request"]["scene"] == "cook" and prompt["catalog"]
-        assert prompt["repair"]["validationCode"] == "hidden_ingredient"
+        assert prompt["repair"]["validationCode"] == "strict_main_ingredient"
         return httpx.Response(200, json=envelope())
 
     adapter = OpenAICompatibleClient(replace(BASE, response_format=response_format), httpx.MockTransport(handler))
-    assert asyncio.run(adapter.generate(REQUEST, "hidden_ingredient")) == "{}"
+    assert asyncio.run(adapter.generate(REQUEST, "strict_main_ingredient")) == "{}"
     assert len(seen) == 1
 
 

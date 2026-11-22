@@ -3,10 +3,12 @@ import type { DemoState, Preferences } from './data/preferences'
 import { emptyPreferences, readDemoState, storageKey, tasteOptions } from './data/preferences'
 import { snapshots, toRecipe } from './data/generation'
 import type { GeneratedSnapshot, GenerationResponse } from './data/generation'
+import { attachPhoto, matchDishPhotos } from './data/photos'
+import type { PhotoMap } from './data/photos'
 import { useGeneration } from './data/useGeneration'
 import GenerationPanel from './components/GenerationPanel'
 import { recipes } from './data/recipes'
-import type { BudgetBand, DiningMode } from './data/recipes'
+import type { BudgetBand, DiningMode, Recipe } from './data/recipes'
 import { budgetOptions, recommendByIngredients, recommendByPreference } from './data/recommendations'
 import { readPantry } from './data/pantry'
 import FridgePage from './components/FridgePage'
@@ -34,8 +36,8 @@ function Navigation({ hash, count, mobile = false }: { hash: string; count: numb
   return <nav className={mobile ? 'mobile-navigation' : 'desktop-navigation'} aria-label={mobile ? '底部导航' : '主导航'}>{navigation.map((item) => <a key={item.href} href={item.href} className={hash === item.href ? 'is-active' : ''} aria-current={hash === item.href ? 'page' : undefined} aria-label={item.label}><Icon name={item.icon} size={mobile ? 22 : 18} /><span>{mobile ? item.mobileLabel ?? item.label : item.label}</span>{item.href === '#saved' && count > 0 && <span className="nav-count">{count}</span>}</a>)}</nav>
 }
 
-function PhotoCredits({ generated = false }: { generated?: boolean }) {
-  return <footer className="site-footer"><span>TasteAI <span className="footer-dot">·</span> 今天也要好好吃饭</span><span>{generated ? '本地示例与生成内容均标明来源' : '本地 Demo 菜谱 · 非模型推荐'}</span><details className="photo-credits"><summary>摄影与素材来源</summary><div>{recipes.filter((recipe) => recipe.image).map((recipe) => <p key={recipe.id}><span>{recipe.name}：</span><a href={recipe.credit.sourceUrl} target="_blank" rel="noreferrer">{recipe.credit.author}</a><span> / </span><a href={recipe.credit.licenseUrl} target="_blank" rel="noreferrer">{recipe.credit.license}</a></p>)}<p>摄影为摆盘参考，示例配方由本项目独立编写。其余菜品使用项目原创分类占位视觉，不是实物照片。</p></div></details></footer>
+function PhotoCredits({ generated = false, photoRecipes = [] }: { generated?: boolean; photoRecipes?: Recipe[] }) {
+  return <footer className="site-footer"><span>TasteAI <span className="footer-dot">·</span> 今天也要好好吃饭</span><span>{generated ? '本地示例与生成内容均标明来源' : '本地 Demo 菜谱 · 非模型推荐'}</span><details className="photo-credits"><summary>摄影与素材来源</summary><div>{recipes.filter((recipe) => recipe.image).map((recipe) => <p key={recipe.id}><span>{recipe.name}：</span><a href={recipe.credit.sourceUrl} target="_blank" rel="noreferrer">{recipe.credit.author}</a><span> / </span><a href={recipe.credit.licenseUrl} target="_blank" rel="noreferrer">{recipe.credit.license}</a></p>)}{photoRecipes.map((recipe) => <p key={recipe.id}><span>{recipe.name}（菜品示意图）：</span><a href={recipe.credit.sourceUrl} target="_blank" rel="noreferrer">{recipe.credit.author}</a><span> / </span><a href={recipe.credit.licenseUrl} target="_blank" rel="noreferrer">{recipe.credit.license}</a></p>)}{photoRecipes.length > 0 && <p>菜品示意图照片来自 <a href="https://openverse.org" target="_blank" rel="noreferrer">Openverse</a>（仅 CC0 / 公有领域标记 / CC BY 素材），按菜名与主要食材的关键词证据匹配，不是对应菜谱的实际成品照片；署名与授权链接见上方各条目。</p>}<p>摄影为摆盘参考，示例配方由本项目独立编写。其余菜品使用项目原创分类占位视觉，不是实物照片。</p></div></details></footer>
 }
 
 export default function App() {
@@ -48,11 +50,37 @@ export default function App() {
   const [batch, setBatch] = useState(0)
   const [notice, setNotice] = useState<{ text: string } | null>(null)
   const [generated, setGenerated] = useState<GeneratedSnapshot[]>([])
+  const [photos, setPhotos] = useState<PhotoMap>({})
+  const photoPending = useRef(new Set<string>())
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const requestPhotos = useCallback((response: GenerationResponse) => {
+    const dishes = response.recipes.filter((dish) => !photoPending.current.has(dish.id))
+    if (!dishes.length) return
+    dishes.forEach((dish) => photoPending.current.add(dish.id))
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => controller.abort(), 10000)
+    void matchDishPhotos(dishes, response.scene, controller.signal).then((found) => {
+      window.clearTimeout(timer)
+      dishes.forEach((dish) => photoPending.current.delete(dish.id))
+      if (!Object.keys(found).length) return
+      setPhotos((current) => ({ ...current, ...found }))
+      const current = stateRef.current
+      const stored = current.generatedSnapshots ?? []
+      const next = stored.map((item) => found[item.recipe.id] && !item.photo ? { ...item, photo: found[item.recipe.id] } : item)
+      if (next.some((item, index) => item !== stored[index])) {
+        const nextState = { ...current, generatedSnapshots: next }
+        setState(nextState)
+        try { localStorage.setItem(storageKey, JSON.stringify(nextState)) } catch { setNotice({ text: '图片信息已生效，但浏览器无法保存；刷新后收藏可能回到占位图。' }) }
+      }
+    })
+  }, [])
   const registerGenerated = useCallback((response: GenerationResponse) => {
     setGenerated((current) => [...current, ...snapshots(response)].slice(-100))
     setBatch(0)
-  }, [])
-  const allRecipes = useMemo(() => [...recipes, ...new Map([...(state.generatedSnapshots ?? []), ...generated].map((item) => [item.recipe.id, toRecipe(item)])).values()], [state.generatedSnapshots, generated])
+    requestPhotos(response)
+  }, [requestPhotos])
+  const allRecipes = useMemo(() => [...recipes, ...new Map([...(state.generatedSnapshots ?? []), ...generated].map((item) => [item.recipe.id, toRecipe(attachPhoto(item, photos))])).values()], [state.generatedSnapshots, generated, photos])
   const returnTo = useRef(window.history.state?.tasteaiRecipe === window.location.hash && ['#home', '#saved', '#fridge'].includes(window.history.state?.tasteaiReturnTo) ? window.history.state.tasteaiReturnTo as string : '#home')
   const previousHash = useRef(window.location.hash || '#home')
   const restoreSavedFocus = useRef(false)
@@ -131,7 +159,7 @@ export default function App() {
     window.location.hash = '#home'
   }
 
-  const recommendations = generation.result ? snapshots(generation.result).map((item) => ({ recipe: toRecipe(item), reasons: [item.recipe.recommendationReason] })) : recommendByPreference(recipes, { mode, preferences: state.preferences, taste: tasteFilter, maxMinutes: quickTime ? 15 : 0, budget, saved: state.saved })
+  const recommendations = generation.result ? snapshots(generation.result).map((item) => ({ recipe: toRecipe(attachPhoto(item, photos)), reasons: [item.recipe.recommendationReason] })) : recommendByPreference(recipes, { mode, preferences: state.preferences, taste: tasteFilter, maxMinutes: quickTime ? 15 : 0, budget, saved: state.saved })
   const offset = recommendations.length ? batch % recommendations.length : 0
   const ordered = [...recommendations.slice(offset), ...recommendations.slice(0, offset)]
   const featuredResult = ordered[0]
@@ -152,7 +180,7 @@ export default function App() {
         <a className="header-preferences" href="#preferences" aria-label="调整口味偏好"><Icon name="sliders" size={16} /><span>调整口味</span><Icon name="chevron" size={14} /></a>
       </header>
 
-      {isPreferences ? <PreferencesPage preferences={state.preferences} onComplete={completePreferences} /> : isFridge ? <FridgePage preferences={state.preferences} saved={state.saved} onToggle={toggleSave} onGenerated={registerGenerated} /> : isDetail ? recipe ? <RecipePage key={`${recipe.id}-${detailMode}`} recipe={recipe} mode={detailMode} reasons={recipe.generation ? [recipe.reason] : detailReasons} saved={state.saved.includes(recipe.id)} onToggle={toggleSave} returnTo={returnTo.current} /> : <main className="not-found"><Icon name="book" size={44} /><h1 tabIndex={-1}>这道菜暂时不在小厨房</h1><p>回到首页，再挑一道喜欢的吧。</p><a className="primary-button" href="#home">看看今日推荐<Icon name="arrow" /></a></main> : (
+      {isPreferences ? <PreferencesPage preferences={state.preferences} onComplete={completePreferences} /> : isFridge ? <FridgePage preferences={state.preferences} saved={state.saved} onToggle={toggleSave} onGenerated={registerGenerated} photos={photos} /> : isDetail ? recipe ? <RecipePage key={`${recipe.id}-${detailMode}`} recipe={recipe} mode={detailMode} reasons={recipe.generation ? [recipe.reason] : detailReasons} saved={state.saved.includes(recipe.id)} onToggle={toggleSave} returnTo={returnTo.current} /> : <main className="not-found"><Icon name="book" size={44} /><h1 tabIndex={-1}>这道菜暂时不在小厨房</h1><p>回到首页，再挑一道喜欢的吧。</p><a className="primary-button" href="#home">看看今日推荐<Icon name="arrow" /></a></main> : (
         <main id="main-content" className="home-page page-enter">
           <section className="home-intro">
             <div><p className="greeting"><Icon name="sun" size={17} />把今天，过得有滋有味</p><h1 tabIndex={-1}>{isSaved ? '喜欢的味道，留给下一餐' : '今天，吃点喜欢的。'}</h1><p className="intro-subtitle">{isSaved ? `${savedRecipes.length} 道心动菜谱，只存在你的浏览器里。` : '不必纠结，一顿好饭的灵感就在这里。'}</p></div>
@@ -182,7 +210,7 @@ export default function App() {
               <section className="featured-section" aria-labelledby="featured-title">
                 <div className="section-heading"><div><span className="section-dot" /><h2 id="featured-title">今天，就吃这道吧</h2></div>{(!generation.result || ordered.length > 3) && <button className="text-button shuffle-button" type="button" disabled={ordered.length < 2} onClick={() => { setBatch((current) => current + 1); setNotice({ text: generation.result ? `已切换本次候选，共 ${ordered.length} 道；未再次请求 AI。` : `已切换主推，当前共有 ${ordered.length} 道匹配的 Demo 菜谱。` }) }}><Icon name="refresh" size={15} />{generation.result ? '浏览本次候选' : '换一批'}</button>}</div>
                 <article className="featured-card" aria-label="今日主推菜谱">
-                  <div className="featured-visual"><a href={recipeHref(featured.id)} aria-label={`查看${featured.name}${mode === 'cook' ? '做法' : '点餐建议'}`}><FoodImage key={featured.id} src={featured.image} alt={featured.photoAlt} category={featured.generation?.recipe.imageFallbackCategory ?? featured.imageFallbackCategory} priority /></a><span className="featured-badge"><Icon name="spark" size={14} />{mode === 'cook' ? '今日主推' : '今日点餐灵感'}</span><SaveButton recipe={featured} saved={state.saved.includes(featured.id)} onToggle={toggleSave} /><span className="image-note">一人食，也要认真吃</span></div>
+                  <div className="featured-visual"><a href={recipeHref(featured.id)} aria-label={`查看${featured.name}${mode === 'cook' ? '做法' : '点餐建议'}`}><FoodImage key={featured.id} src={featured.image} alt={featured.photoAlt} category={featured.generation?.recipe.imageFallbackCategory ?? featured.imageFallbackCategory} priority illustrative={!!featured.generation?.photo} /></a><span className="featured-badge"><Icon name="spark" size={14} />{mode === 'cook' ? '今日主推' : '今日点餐灵感'}</span><SaveButton recipe={featured} saved={state.saved.includes(featured.id)} onToggle={toggleSave} /><span className="image-note">一人食，也要认真吃</span></div>
                   <div className="featured-copy"><div className="featured-name"><div><span className="recipe-kicker">{featured.kicker}</span><h3>{featured.name}</h3></div>{mode === 'cook' ? <span className="recipe-time"><Icon name="clock" size={17} /><strong>{featured.minutes}</strong> 分钟</span> : <span className="dining-category"><Icon name="dining" size={17} />{featured.dining.category}</span>}</div><p className="featured-reason"><Icon name="spark" size={15} />{featuredResult.reasons.join('；')}</p>{mode === 'out' && <p className="ordering-preview">{featured.dining.orderingTip}</p>}<div className="featured-bottom"><div className="tag-row">{featured.tastes.slice(0, 2).map((taste) => <span key={taste}>{taste}</span>)}<span>{mode === 'cook' ? featured.difficulty : '菜品灵感'}</span></div><a className="primary-button" href={recipeHref(featured.id)}>{mode === 'cook' ? '看看做法' : '点餐建议'}<Icon name="arrow" size={17} /></a></div></div>
                 </article>
                 <p className="ranking-note">{generation.result ? `本次生成 ${recommendations.length} 道菜品；重新生成会重新请求后端，不是轮换原有示例。` : `按规则得分排序，同分按菜谱库顺序。换一批按此顺序轮换主推，不生成新菜；当前第 ${offset + 1} / ${recommendations.length} 道。`}</p>
@@ -197,7 +225,7 @@ export default function App() {
           </>}
         </main>
       )}
-      {!isPreferences && <PhotoCredits generated={generated.length > 0 || !!state.generatedSnapshots?.length} />}
+      {!isPreferences && <PhotoCredits generated={generated.length > 0 || !!state.generatedSnapshots?.length} photoRecipes={allRecipes.filter((item) => item.generation?.photo)} />}
       {!isDetail && !isPreferences && <Navigation hash={isSaved ? '#saved' : isFridge ? '#fridge' : '#home'} count={state.saved.length} mobile />}
       <div className={`toast ${notice ? 'is-visible' : ''}`} role="status" aria-live="polite">{notice && <><Icon name="check" size={18} /><span>{notice.text}</span><button type="button" aria-label="关闭提示" onClick={() => setNotice(null)}><Icon name="close" size={15} /></button></>}</div>
     </div>

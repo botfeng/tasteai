@@ -69,6 +69,10 @@ beforeEach(() => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url
     if (url === statusUrl && (!init?.method || init.method === 'GET')) return statusFetch()
     if (url === generateUrl && init?.method === 'POST') return generationFetch(JSON.parse(String(init.body)) as GenerationRequest, init.signal)
+    if (url === '/api/photos/match' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body)) as { dishes: { id: string }[] }
+      return json({ configured: false, photos: body.dishes.map((dish) => ({ dishId: dish.id, photo: null })) })
+    }
     throw new Error(`Unexpected fetch: ${init?.method ?? 'GET'} ${url}`)
   })
   vi.stubGlobal('fetch', fetchMock)

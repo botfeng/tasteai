@@ -39,8 +39,21 @@ export type GenerationResponse = {
   notice: string
   warnings: string[]
 }
+export type DishPhoto = {
+  url: string
+  alt: string
+  photographer: string
+  photographerUrl: string
+  pageUrl: string
+  width: number
+  height: number
+  license: string
+  licenseUrl: string
+  source: 'openverse'
+}
 export type GeneratedSnapshot = Pick<GenerationResponse, 'source' | 'model' | 'scene' | 'servings'> & {
   recipe: GeneratedDish
+  photo?: DishPhoto
 }
 export type EngineStatus = { mode: 'disabled' | 'mock' | 'openai_compatible'; configured: boolean; source: 'mock' | 'ai' | null; model: string | null; message: string }
 
@@ -68,11 +81,34 @@ function validDish(value: unknown): value is GeneratedDish {
     (value.diningCategory === null || text(value.diningCategory, 100)) && (value.orderingTip === null || text(value.orderingTip)) && strings(value.matchedPreferences, 20)
 }
 
+const httpsUrl = (value: unknown): value is string => {
+  if (typeof value !== 'string' || value.length > 2000 || /[\s\\]/.test(value)) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.username && !url.password && !url.hash
+  } catch {
+    return false
+  }
+}
+
+export function validPhoto(value: unknown): value is DishPhoto {
+  if (!object(value)) return false
+  return httpsUrl(value.url) && value.url.startsWith('https://api.openverse.org/v1/images/') && value.url.endsWith('/thumb/') &&
+    httpsUrl(value.pageUrl) && httpsUrl(value.photographerUrl) &&
+    httpsUrl(value.licenseUrl) && value.licenseUrl.startsWith('https://creativecommons.org/') &&
+    text(value.alt, 300) && value.alt.trim().length > 0 &&
+    text(value.photographer, 200) && value.photographer.trim().length > 0 &&
+    text(value.license, 100) && value.license.trim().length > 0 && value.source === 'openverse' &&
+    Number.isInteger(value.width) && Number(value.width) >= 1 && Number(value.width) <= 10000 &&
+    Number.isInteger(value.height) && Number(value.height) >= 1 && Number(value.height) <= 10000
+}
+
 export function validSnapshot(value: unknown): value is GeneratedSnapshot {
   if (!object(value) || !validDish(value.recipe)) return false
   return oneOf(value.source, ['mock', 'ai']) && oneOf(value.scene, ['cook', 'eat_out', 'fridge']) &&
     (value.model === null || text(value.model, 200)) && Number.isInteger(value.servings) && Number(value.servings) >= 1 && Number(value.servings) <= 6 &&
-    (value.scene === 'eat_out' ? value.recipe.cookingSteps.length === 0 && value.recipe.estimatedTime === null : value.recipe.cookingSteps.length >= 2 && value.recipe.estimatedTime !== null)
+    (value.photo === undefined || validPhoto(value.photo)) &&
+    (value.scene === 'eat_out' ? value.recipe.cookingSteps.length === 0 && value.recipe.estimatedTime === null : value.recipe.cookingSteps.length >= 1 && value.recipe.estimatedTime !== null)
 }
 
 export function parseGeneration(value: unknown, maxRecipes = 5): GenerationResponse {
@@ -93,18 +129,21 @@ export function snapshots(response: GenerationResponse): GeneratedSnapshot[] {
 export function toRecipe(snapshot: GeneratedSnapshot): Recipe {
   const dish = snapshot.recipe
   const isOut = snapshot.scene === 'eat_out'
+  const photo = snapshot.photo
   return {
     id: dish.id, name: dish.name, description: dish.description,
     kicker: snapshot.source === 'mock' ? 'Mock 演示 · 非真实 AI' : 'AI 生成 · 未经人工审核',
     minutes: dish.estimatedTime ?? 0, difficulty: '按步骤尝试', tastes: dish.matchedPreferences,
     categories: [], category: isOut ? dish.diningCategory ?? '点餐灵感' : '生成菜谱', diningModes: [isOut ? 'out' : 'cook'],
     dining: { category: dish.diningCategory ?? '菜品建议', budget: 'balanced', orderingTip: dish.orderingTip ?? '' },
-    image: '', photoAlt: `${dish.name}的分类插画占位，非实物照片`, reason: dish.recommendationReason,
+    image: photo?.url ?? '', photoAlt: photo ? `${dish.name}的菜品示意图，非本菜谱实际成品` : `${dish.name}的分类插画占位，非实物照片`, reason: dish.recommendationReason,
     ingredients: dish.ingredients.map((item) => ({ name: item.name, canonical: item.name, amount: item.amount, role: item.role === 'main' ? 'required' : 'seasoning' })),
     steps: dish.cookingSteps.map((step) => ({ title: step.title, body: step.body })),
     allergens: '生成内容未经人工审核；请自行核对食材新鲜度、用量、过敏原和充分加热要求。',
     tip: '预计时间仅供参考，请结合器具、份量和实际熟度调整；不提供营养数值或食品安全保证。',
-    credit: { author: 'TasteAI 原创分类占位视觉', sourceUrl: '', license: '项目原创', licenseUrl: '' },
+    credit: photo
+      ? { author: `${photo.photographer}（Openverse）`, sourceUrl: photo.pageUrl, license: photo.license, licenseUrl: photo.licenseUrl }
+      : { author: 'TasteAI 原创分类占位视觉', sourceUrl: '', license: '项目原创', licenseUrl: '' },
     generation: snapshot,
   }
 }

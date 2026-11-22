@@ -3,6 +3,8 @@ import { tasteOptions } from '../data/preferences'
 import type { Preferences } from '../data/preferences'
 import { snapshots, toRecipe } from '../data/generation'
 import type { GenerationResponse } from '../data/generation'
+import { attachPhoto } from '../data/photos'
+import type { PhotoMap } from '../data/photos'
 import { useGeneration } from '../data/useGeneration'
 import GenerationPanel from './GenerationPanel'
 import RecipeCard from './RecipeCard'
@@ -17,11 +19,12 @@ import { SaveButton } from './RecipeCard'
 
 const statusLabels = { ready: '主要食材齐全', almost: '还缺少少量材料', insufficient: '当前食材不足' }
 
-export default function FridgePage({ preferences, saved, onToggle, onGenerated }: {
+export default function FridgePage({ preferences, saved, onToggle, onGenerated, photos }: {
   preferences: Preferences
   saved: string[]
   onToggle: (id: string) => void
   onGenerated: (response: GenerationResponse) => void
+  photos: PhotoMap
 }) {
   const [pantry, setPantry] = useState(readPantry)
   const [feedback, setFeedback] = useState('')
@@ -103,7 +106,7 @@ export default function FridgePage({ preferences, saved, onToggle, onGenerated }
       <section className="pantry-results" aria-labelledby="pantry-results-title">
         <GenerationPanel generation={generation} label="AI 生成菜谱" disabledMessage={!selectedIds.length ? '先从食材目录选择几样已有食材。' : ''} />
         <div className="section-heading"><h2 id="pantry-results-title">这一餐，有这些可能</h2><span className="section-caption">{generation.result ? generation.result.recipes.length : results.length} 道{generation.result ? '生成' : '匹配'}</span></div>
-        {generation.result ? generation.result.recipes.length ? <div className="generated-fridge-grid">{snapshots(generation.result).map((snapshot) => <RecipeCard key={snapshot.recipe.id} recipe={toRecipe(snapshot)} saved={saved.includes(snapshot.recipe.id)} onToggle={onToggle} reasons={[snapshot.recipe.recommendationReason]} />)}</div> : <div className="empty-state pantry-empty"><Icon name="fridge" size={36} /><h3>这些食材，暂时没有合理的做法</h3><p>不为了凑数编造菜谱。可以补充食材或调整条件，再试一次。</p></div> : <>
+        {generation.result ? generation.result.recipes.length ? <div className="generated-fridge-grid">{snapshots(generation.result).map((snapshot) => <RecipeCard key={snapshot.recipe.id} recipe={toRecipe(attachPhoto(snapshot, photos))} saved={saved.includes(snapshot.recipe.id)} onToggle={onToggle} reasons={[snapshot.recipe.recommendationReason]} />)}</div> : <div className="empty-state pantry-empty"><Icon name="fridge" size={36} /><h3>这些食材，暂时没有合理的做法</h3><p>不为了凑数编造菜谱。可以补充食材或调整条件，再试一次。</p></div> : <>
         <p className="pantry-hint">本地规则示例：按必需食材覆盖率排序；覆盖率不是成功概率。</p>
         {unknown.length > 0 && <p className="pantry-warning">暂不认识：{unknown.join('、')}。这些名称未计入覆盖率。</p>}
         {results.length ? <div className="ingredient-results-list">{results.map((result) => <article key={result.recipe.id} className="ingredient-result" aria-label={`${result.recipe.name}匹配结果`}>

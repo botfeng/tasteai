@@ -17,7 +17,7 @@ from app.mock import MockClient
 from app.schemas import RecommendationRequest
 from app.service import RecommendationService
 from app.settings import Settings
-from app.validation import QUALITY_MESSAGES, quality_review, validate_output
+from app.validation import validate_output
 
 REQUEST = RecommendationRequest(scene="fridge", ingredientIds=["tomato", "egg", "potato"])
 FAKE_KEY = "offline-sentinel-not-a-real-key"
@@ -80,59 +80,15 @@ def serialize(data):
     return json.dumps(data, ensure_ascii=False)
 
 
-@pytest.mark.parametrize("kind", ["duplicate", "missing-hyphen"])
-def test_step_reference_normalization_requires_body_evidence(kind):
-    data = payload()
-    recipe = data["recipes"][0]
-    step = recipe["cookingSteps"][0]
-    original = list(step["ingredientIds"])
-    if kind == "duplicate":
-        step["ingredientIds"].append(original[0])
-        expected = original
-    else:
-        recipe["ingredients"].append({"ingredientId": "black-pepper", "name": "黑胡椒", "amount": "1克", "role": "seasoning"})
-        step["body"] += "加入黑胡椒拌匀。"
-        step["ingredientIds"].append("blackpepper")
-        expected = [*original, "black-pepper"]
-    result = validate_output(serialize(data), REQUEST)
-    assert result[0].cookingSteps[0].ingredientIds == expected
-
-
-@pytest.mark.parametrize("kind", ["unknown", "known-other-food", "no-body-evidence", "not-declared", "duplicate-without-evidence", "negated-use"])
-def test_uncertain_step_reference_is_not_silently_deleted(kind):
-    data = payload()
-    recipe = data["recipes"][0]
-    step = recipe["cookingSteps"][0]
-    if kind == "unknown":
-        step["ingredientIds"].append("mystery-food")
-    elif kind == "known-other-food":
-        step["ingredientIds"].append("beef")
-    elif kind == "duplicate-without-evidence":
-        step["ingredientIds"].extend(["oil", "oil"])
-    elif kind == "negated-use":
-        step["ingredientIds"].append("blackpepper")
-        recipe["ingredients"].append({"ingredientId": "black-pepper", "name": "黑胡椒", "amount": "1克", "role": "seasoning"})
-        step["body"] += "不要加入黑胡椒。"
-    else:
-        step["ingredientIds"].append("blackpepper")
-        if kind == "no-body-evidence":
-            recipe["ingredients"].append({"ingredientId": "black-pepper", "name": "黑胡椒", "amount": "1克", "role": "seasoning"})
-        else:
-            step["body"] += "加入黑胡椒。"
-    with pytest.raises(OutputValidationError) as caught:
-        validate_output(serialize(data), REQUEST)
-    assert caught.value.code == "step_ingredient_reference"
-
-
 @pytest.mark.parametrize("scene,kind,code", [
     (scene, kind, code)
     for scene in ("fridge", "cook", "eat_out")
     for kind, code in (
-        ("reference", "step_ingredient_reference"), ("schema", "invalid_json_or_schema"),
-        ("hidden", "hidden_ingredient"), ("dangerous", "raw_food_instructions"),
-        ("duplicate", "duplicate_recipe"), ("strict", "strict_main_ingredient"),
+        ("identity", "ingredient_identity"), ("schema", "invalid_json_or_schema"),
+        ("steps", "missing_steps"), ("duplicate", "duplicate_recipe"),
+        ("strict", "strict_main_ingredient"),
     )
-    if not (scene == "eat_out" and kind in {"reference", "dangerous"})
+    if not (scene == "eat_out" and kind == "steps")
     and not (kind == "strict" and scene != "fridge")
 ])
 def test_partial_batch_retains_only_valid_recipes(scene, kind, code):
@@ -140,16 +96,14 @@ def test_partial_batch_retains_only_valid_recipes(scene, kind, code):
     data = json.loads(asyncio.run(MockClient().generate(request)))
     data["recipes"] = data["recipes"][:3]
     recipe = data["recipes"][2]
-    if kind == "reference":
-        recipe["cookingSteps"][0]["ingredientIds"].append("mystery-food")
+    if kind == "identity":
+        recipe["ingredients"].append({"ingredientId": "mystery-food", "amount": "1克"})
     elif kind == "schema":
-        recipe["ingredients"][0]["amount"] = "适量"
-    elif kind == "hidden":
-        recipe["description"] += "加入牛奶。"
-    elif kind == "dangerous":
-        recipe["cookingSteps"][0]["body"] += "可以生吃。"
+        recipe["ingredients"][0]["amount"] = "x" * 25
+    elif kind == "steps":
+        recipe["steps"] = []
     elif kind == "strict":
-        recipe["ingredients"].append({"ingredientId": "beef", "name": "牛肉", "role": "main", "amount": "100克"})
+        recipe["ingredients"].append({"ingredientId": "beef", "amount": "100克"})
     else:
         data["recipes"][2] = data["recipes"][0]
     client = FakeClient(serialize(data))
@@ -167,7 +121,7 @@ def test_batch_without_acceptable_output_remains_rejected(kind):
     data = payload()
     if kind == "all-invalid":
         for recipe in data["recipes"]:
-            recipe["cookingSteps"][0]["ingredientIds"].append("mystery-food")
+            recipe["ingredients"].append({"ingredientId": "mystery-food", "amount": "1克"})
     elif kind == "broken-envelope":
         data["extra"] = "unexpected"
     else:
@@ -179,45 +133,33 @@ def test_batch_without_acceptable_output_remains_rejected(kind):
     assert client.calls == 1
 
 
-@pytest.mark.parametrize("text,warn", [
-    ("番茄自带酸味。", False), ("番茄自然酸甜。", True),
-    ("风味浓郁。", True), ("口感咸鲜。", False),
-])
-def test_flavor_prose_uses_existing_warnings(text, warn):
+@pytest.mark.parametrize("text", ["番茄自带酸味。", "番茄自然酸甜。", "风味浓郁。", "口感咸鲜。"])
+def test_flavor_prose_is_preserved_without_review_machinery(text):
     data = payload()
     data["recipes"][0]["description"] = text
     client = FakeClient(serialize(data))
     response = asyncio.run(RecommendationService(Settings(mode="mock", max_repairs=0), client).generate(REQUEST, PRIVATE))
     assert response.recipes[0].description == text
-    assert ("flavor_review" in quality_review(response.recipes[0])) is warn
-    assert any(QUALITY_MESSAGES["flavor_review"] in warning for warning in response.warnings) is warn
+    assert not any("待人工复核" in warning or "已淘汰" in warning for warning in response.warnings)
     assert client.calls == 1
 
 
-@pytest.mark.parametrize("kind,code", [
-    ("hidden", "hidden_ingredient"), ("allergen", "hidden_ingredient"),
-    ("strict", "strict_main_ingredient"), ("preference", "unsupported_preference"),
-    ("guarantee", "unsupported_claim_or_url"),
-])
-def test_flavor_warning_does_not_relax_hard_constraints(kind, code):
+def test_strict_constraint_is_not_relaxed_by_flavor_prose():
     data = payload()
     recipe = data["recipes"][0]
     recipe["description"] = "番茄自然酸甜。"
-    request = REQUEST
-    if kind == "hidden":
-        recipe["description"] += "加入酱油。"
-    elif kind == "allergen":
-        recipe["description"] += "加入牛奶。"
-    elif kind == "strict":
-        recipe["ingredients"].append({"ingredientId": "beef", "name": "牛肉", "role": "main", "amount": "100克"})
-    elif kind == "preference":
-        request = REQUEST.model_copy(update={"todayTaste": "酸甜"})
-        recipe["matchedPreferences"] = ["酸甜"]
-    else:
-        recipe["description"] += "保证无过敏。"
+    recipe["ingredients"].append({"ingredientId": "beef", "amount": "100克"})
     with pytest.raises(OutputValidationError) as caught:
-        validate_output(serialize(data), request)
-    assert caught.value.code == code
+        validate_output(serialize(data), REQUEST)
+    assert caught.value.code == "strict_main_ingredient"
+
+
+def test_model_preference_claims_are_ignored_and_recomputed():
+    data = payload()
+    data["recipes"][0]["matchedPreferences"] = ["酸甜"]
+    request = REQUEST.model_copy(update={"todayTaste": "酸甜"})
+    recipe = validate_output(serialize(data), request)[0]
+    assert recipe.matchedPreferences == []
 
 
 @pytest.mark.parametrize("reason", ["番茄自然酸甜。", "符合酸甜偏好。", "满足您所有口味偏好。"])
@@ -231,62 +173,52 @@ def test_reason_keywords_are_not_published_as_preference_claims(reason):
     assert "偏好" not in recipe.recommendationReason
 
 
-@pytest.mark.parametrize("text,allowed", [
-    ("注意食品安全。", True), ("请注意食品安全，生熟工具分开。", True),
-    ("请注意安全。", True), ("注意饮食安全。", True),
-    ("保证食品安全。", False), ("本菜绝对安全。", False),
-    ("注意食品安全。保证无过敏。", False),
-    ("注意食品安全，食用无风险。", False),
-    ("只要注意食品安全就能放心食用。", False),
+@pytest.mark.parametrize("text", [
+    "注意食品安全。", "请注意食品安全，生熟工具分开。", "保证食品安全。", "本菜绝对安全。",
+    "注意食品安全。保证无过敏。", "只要注意食品安全就能放心食用。",
 ])
-def test_safety_reminders_are_distinct_from_guarantees(text, allowed):
+def test_safety_text_is_not_word_scanned(text):
+    # Guidance and disclaimers live in the prompt and UI; the backend keeps no vocabulary list.
     data = payload()
     data["recipes"][0]["description"] = text
-    if allowed:
-        assert validate_output(serialize(data), REQUEST)[0].description == text
-    else:
-        with pytest.raises(OutputValidationError) as caught:
-            validate_output(serialize(data), REQUEST)
-        assert caught.value.code == "unsupported_claim_or_url"
+    assert validate_output(serialize(data), REQUEST)[0].description == text
 
 
 @pytest.mark.parametrize("text", ["避免半熟。", "不要生吃鸡蛋。", "必须完全煮熟。", "禁止直接生食。", "不可溏心。"])
 def test_explicit_negative_raw_advice_is_not_rejected(text):
     data = payload()
-    data["recipes"][0]["cookingSteps"][1]["body"] += text
+    data["recipes"][0]["steps"][1] += text
     assert len(validate_output(serialize(data), REQUEST)) == 3
 
 
-@pytest.mark.parametrize("text", [
-    "保持半熟即可。", "可以生吃鸡蛋。", "做成溏心。", "建议生食。", "做成刺身。",
-    "不要生吃鸡蛋，但可以半熟。", "不必避免半熟。", "无需禁止生吃鸡蛋。",
-])
-def test_dangerous_or_mixed_advice_remains_rejected(text):
+@pytest.mark.parametrize("text", ["保持半熟即可。", "可以生吃鸡蛋。", "做成溏心。", "建议生食。", "做成刺身。"])
+def test_raw_advice_text_is_not_lexically_rejected(text):
+    # Cooking safety is enforced through the prompt and human-review disclaimers, not word bans.
     data = payload()
-    data["recipes"][0]["cookingSteps"][1]["body"] += text
-    with pytest.raises(OutputValidationError) as caught:
-        validate_output(serialize(data), REQUEST)
-    assert caught.value.code == "raw_food_instructions"
-    assert caught.value.field_path == ("recipes", 0, "cookingSteps", 1, "body")
+    data["recipes"][0]["steps"][1] += text
+    assert len(validate_output(serialize(data), REQUEST)) == 3
 
 
 @pytest.mark.parametrize("kind,code,path", [
     ("strict", "strict_main_ingredient", ["recipes", 0, "ingredients"]),
-    ("hidden", "hidden_step_ingredient", ["recipes", 0, "cookingSteps", 0, "body"]),
+    ("identity", "ingredient_identity", ["recipes", 0, "ingredients", 0]),
     ("schema", "invalid_json_or_schema", ["recipes", 0, "ingredients", 0, "amount"]),
-    ("unknown-field", "invalid_json_or_schema", ["recipes", 0, "unknown_field"]),
+    ("amount", "ingredient_amount", ["recipes", 0, "ingredients", 0, "amount"]),
+    ("steps", "missing_steps", ["recipes", 0, "steps"]),
 ])
 def test_failure_locations_and_friendly_errors(kind, code, path):
     data = payload()
     recipe = data["recipes"][0]
     if kind == "strict":
-        recipe["ingredients"].append({"ingredientId": "beef", "name": "牛肉", "role": "main", "amount": "100克"})
-    elif kind == "hidden":
-        recipe["cookingSteps"][0]["body"] += "加入牛肉。"
+        recipe["ingredients"].append({"ingredientId": "beef", "amount": "100克"})
+    elif kind == "identity":
+        recipe["ingredients"][0]["ingredientId"] = "mystery-food"
     elif kind == "schema":
-        recipe["ingredients"][0]["amount"] = PRIVATE
+        recipe["ingredients"][0]["amount"] = "x" * 25
+    elif kind == "amount":
+        recipe["ingredients"][0]["amount"] = "   "
     else:
-        recipe[PRIVATE] = PRIVATE
+        recipe["steps"] = []
     data["recipes"] = [recipe]
     client = FakeClient(serialize(data))
     with pytest.raises(RecommendationError) as caught:
@@ -304,6 +236,19 @@ def test_failure_locations_and_friendly_errors(kind, code, path):
     text = diagnostics.LOG_PATH.read_text(encoding="utf-8")
     for excluded in (FAKE_KEY, PRIVATE, "Authorization", "鸡蛋", "tomato", "requestBody"):
         assert excluded not in text
+
+
+def test_amount_reminder_is_advisory_and_not_logged_as_failure():
+    data = payload()
+    recipe = data["recipes"][0]
+    salt = next(item for item in recipe["ingredients"] if item["ingredientId"] == "salt")
+    salt["amount"] = "1克"
+    recipe["steps"][-1] += "加2克盐调味。"
+    client = FakeClient(serialize(data))
+    response = asyncio.run(RecommendationService(Settings(mode="mock", max_repairs=0), client).generate(REQUEST, PRIVATE))
+    assert len(response.recipes) == 3
+    assert any("超过总量" in warning for warning in response.warnings)
+    assert not any(row["event"] == "validation_failed" for row in logs())
 
 
 @pytest.mark.parametrize("status,content,expected", [
@@ -331,7 +276,7 @@ def test_upstream_status_and_elapsed_from_mock_transport(status, content, expect
     assert upstream["httpStatus"] == status
     assert upstream["elapsedMs"] >= 0
     assert upstream["realRequestStarted"] is True
-    assert upstream["promptVersion"] == "V2" and upstream["scene"] == "fridge"
+    assert upstream["promptVersion"] == "V3" and upstream["scene"] == "fridge"
     assert rows[-1]["code"] == expected
     assert FAKE_KEY not in serialize(rows) and PRIVATE not in serialize(rows)
 

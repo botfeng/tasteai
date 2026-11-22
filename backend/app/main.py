@@ -4,21 +4,25 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
 from app.api.health import router as health_router
+from app.api.photos import router as photos_router
 from app.api.recommendations import router as recommendations_router
 from app.clients import RecommendationClient
 from app.errors import RecommendationError
 from app.limiter import LocalLimiter
+from app.photos import PhotoService
 from app.service import RecommendationService
 from app.settings import Settings
 
 
 def create_app(settings: Settings | None = None, client: RecommendationClient | None = None,
-               limiter: LocalLimiter | None = None) -> FastAPI:
+               limiter: LocalLimiter | None = None, photo_service: PhotoService | None = None) -> FastAPI:
     application = FastAPI(
-        title="TasteAI API", version="0.3.0",
-        description="TasteAI Day 3：仅供单进程本地演示；推荐默认关闭，真实 AI 需显式配置与费用授权。",
+        title="TasteAI API", version="0.4.1",
+        description="TasteAI Day 4：仅供单进程本地演示；推荐默认关闭，真实 AI 需显式配置与费用授权；菜品示意图使用 Openverse 匿名搜索（CC0/PDM/CC BY），默认启用。",
     )
-    application.state.recommendation_service = RecommendationService(settings or Settings.from_env(), client, limiter)
+    settings = settings or Settings.from_env()
+    application.state.recommendation_service = RecommendationService(settings, client, limiter)
+    application.state.photo_service = photo_service or PhotoService(settings)
 
     @application.exception_handler(RecommendationError)
     async def recommendation_error(_: Request, error: RecommendationError):
@@ -44,6 +48,7 @@ def create_app(settings: Settings | None = None, client: RecommendationClient | 
 
     application.include_router(health_router, prefix="/api")
     application.include_router(recommendations_router, prefix="/api")
+    application.include_router(photos_router, prefix="/api")
     return application
 
 

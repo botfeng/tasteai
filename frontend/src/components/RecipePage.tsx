@@ -28,7 +28,7 @@ export default function RecipePage({ recipe, saved, onToggle, returnTo, mode = '
     <main id="main-content" className={`detail-page page-enter ${isOut ? 'dining-detail' : ''}`}>
       <div className="detail-toolbar"><a className="icon-button" href={returnTo} aria-label="返回菜谱列表"><Icon name="back" /></a><span>{isOut ? '今天的点餐灵感' : '今日的好味道'}</span><SaveButton recipe={recipe} saved={saved} onToggle={onToggle} /></div>
       <div className="detail-top">
-        <div className="detail-photo"><FoodImage src={recipe.image} alt={recipe.photoAlt} category={generated?.recipe.imageFallbackCategory ?? recipe.imageFallbackCategory} priority /><span className="photo-caption"><Icon name="leaf" size={14} />把一餐，过成喜欢的样子</span></div>
+        <div className="detail-photo"><div className="detail-photo-frame"><FoodImage src={recipe.image} alt={recipe.photoAlt} category={generated?.recipe.imageFallbackCategory ?? recipe.imageFallbackCategory} priority illustrative={!!generated?.photo} /><span className="photo-caption"><Icon name="leaf" size={14} />把一餐，过成喜欢的样子</span></div>{generated?.photo && <p className="photo-attribution">菜品示意图，非本菜谱实拍 · 摄影：<a href={generated.photo.photographerUrl} target="_blank" rel="noreferrer">{generated.photo.photographer}</a> · <a href={generated.photo.pageUrl} target="_blank" rel="noreferrer">原始图片页</a> · <a href={generated.photo.licenseUrl} target="_blank" rel="noreferrer">{generated.photo.license}</a></p>}</div>
         <section className="detail-intro">
           <div className="detail-eyebrow"><span>{recipe.kicker}</span><span>{generated ? generated.source === 'mock' ? 'Mock 演示 · 非真实 AI' : 'AI 生成 · 未经人工审核' : 'Demo 菜谱'}</span></div>
           <h1 tabIndex={-1}>{recipe.name}</h1>
@@ -51,7 +51,7 @@ export default function RecipePage({ recipe, saved, onToggle, returnTo, mode = '
           <div className="section-heading"><h2 id="recipe-steps" tabIndex={-1}>一步步，好好做</h2><span className="section-caption">{recipe.steps.length} 个步骤</span></div>
           <ol className="steps-list">{recipe.steps.map((step, index) => <li key={`${index}-${step.title}`}><span className="step-number">{String(index + 1).padStart(2, '0')}</span><div><h3>{step.title}</h3><p>{step.body}</p></div></li>)}</ol>
           <div className="cooking-tip"><Icon name="chef" size={21} /><div><strong>厨房里的小贴士</strong><p>{recipe.tip}</p></div></div>
-          <p className="demo-explanation">{generated ? `${generated.source === 'mock' ? 'Mock 测试菜谱，非真实 AI 输出' : 'AI 生成菜谱，未经人工审核'}；分类插画不是实物照片。收藏会在本机保存完整菜谱快照。` : recipe.imageFallbackCategory ? '本地 Demo 原创示例菜谱，分类插画是项目原创占位视觉，不是菜品实物照片。' : '本地 Demo 原创示例菜谱，摄影仅作摆盘参考；不是摄影作者提供或验证的配方。'}</p>
+          <p className="demo-explanation">{generated ? `${generated.source === 'mock' ? 'Mock 测试菜谱，非真实 AI 输出' : 'AI 生成菜谱，未经人工审核'}；${generated.photo ? '照片是按菜名与食材匹配到的菜品示意图，不是本菜谱的实际成品' : '分类插画不是实物照片'}。收藏会在本机保存完整菜谱快照。` : recipe.imageFallbackCategory ? '本地 Demo 原创示例菜谱，分类插画是项目原创占位视觉，不是菜品实物照片。' : '本地 Demo 原创示例菜谱，摄影仅作摆盘参考；不是摄影作者提供或验证的配方。'}</p>
         </section>
       </div>}
       <div className="mobile-cook"><button type="button" className={`secondary-button ${saved ? 'is-saved' : ''}`} aria-pressed={saved} onClick={() => onToggle(recipe.id)}><Icon name="heart" size={19} />{saved ? '已收藏' : '收藏'}</button>{isOut ? <a className="primary-button" href={returnTo}>返回点餐灵感<Icon name="back" size={18} /></a> : <button type="button" className="primary-button" onClick={startCooking}>开始做这道菜<Icon name="arrow" size={18} /></button>}</div>

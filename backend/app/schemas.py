@@ -12,7 +12,9 @@ CATEGORIES = ("蔬菜", "鸡肉", "鱼虾", "面食", "蛋奶", "菌菇")
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9-]*$")]
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
-Amount = Annotated[str, StringConstraints(min_length=2, max_length=24, pattern=r"^[0-9]{1,4}(?:\.[0-9]{1,2})?(?:克|毫升|个|片|根|朵|勺|茶匙|汤匙|份)$")]
+FreeText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
+AmountText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=24)]
+StepText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
 
 
 class StrictModel(BaseModel):
@@ -55,20 +57,20 @@ class RecommendationRequest(StrictModel):
 class Ingredient(StrictModel):
     ingredientId: Identifier
     name: ShortText
-    amount: Amount
+    amount: AmountText
     role: Literal["main", "seasoning"]
 
 
 class CookingStep(StrictModel):
     title: ShortText
     body: Text
-    ingredientIds: list[Identifier] = Field(min_length=1, max_length=30)
+    ingredientIds: list[Identifier] = Field(max_length=30)
 
 
 class CandidateRecipe(StrictModel):
-    # Every model-produced field is required, including nullable fields.
+    # Backend-owned output DTO; every field is required, including nullable fields.
     name: ShortText
-    description: Text
+    description: FreeText
     ingredients: list[Ingredient] = Field(min_length=1, max_length=30)
     cookingSteps: list[CookingStep] = Field(max_length=12)
     estimatedTime: int | None = Field(ge=1, le=180)
@@ -80,8 +82,70 @@ class CandidateRecipe(StrictModel):
     matchedPreferences: list[ShortText] = Field(max_length=13)
 
 
-class ModelOutput(StrictModel):
-    recipes: list[CandidateRecipe] = Field(max_length=5)
+class ModelIngredient(BaseModel):
+    """Lean model input: the backend resolves names, roles and missing materials."""
+    model_config = ConfigDict(extra="forbid")
+
+    ingredientId: Annotated[str, StringConstraints(max_length=64)]
+    amount: AmountText
+
+    @model_validator(mode="before")
+    @classmethod
+    def tolerant_input(cls, data):
+        if isinstance(data, dict):
+            data = {key: value for key, value in data.items() if key in cls.model_fields}
+            if isinstance(data.get("amount"), (int, float)) and not isinstance(data["amount"], bool):
+                data["amount"] = str(data["amount"])
+        return data
+
+
+class ModelRecipe(BaseModel):
+    """Lean model input: plain-text steps, no per-step ingredient references.
+
+    Fields stay required (no defaults) so the strict json_schema contract holds;
+    the before-validator drops unknown keys and fills optional omissions.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    name: ShortText
+    description: FreeText
+    ingredients: list[ModelIngredient] = Field(min_length=1, max_length=30)
+    steps: list[StepText] = Field(max_length=12)
+    estimatedTime: int | None
+    diningCategory: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None
+    orderingTip: FreeText | None
+    imageFallbackCategory: Annotated[str, StringConstraints(max_length=32)] | None
+
+    @model_validator(mode="before")
+    @classmethod
+    def tolerant_input(cls, data):
+        if not isinstance(data, dict):
+            return data
+        data = {key: value for key, value in data.items() if key in cls.model_fields}
+        for key, default in (("description", ""), ("steps", []), ("estimatedTime", None),
+                             ("diningCategory", None), ("orderingTip", None), ("imageFallbackCategory", None)):
+            data.setdefault(key, default)
+        if isinstance(data["steps"], list):
+            steps = []
+            for item in data["steps"]:
+                if isinstance(item, dict):
+                    item = item.get("body") or item.get("text") or item.get("description")
+                if isinstance(item, str):
+                    steps.append(item)
+            data["steps"] = steps
+        time = data["estimatedTime"]
+        if isinstance(time, str) and time.strip().isdigit():
+            time = int(time.strip())
+        if isinstance(time, float) and time.is_integer():
+            time = int(time)
+        data["estimatedTime"] = time if isinstance(time, int) and not isinstance(time, bool) else None
+        return data
+
+
+class ModelOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recipes: list[ModelRecipe] = Field(max_length=5)
 
 
 class RawModelOutput(StrictModel):

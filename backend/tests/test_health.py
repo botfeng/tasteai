@@ -27,10 +27,12 @@ def test_business_routes_are_not_implemented(client):
     assert client.get("/api/recipes").status_code == 404
 
 
-def test_openapi_declares_health_and_day3_routes(client):
+def test_openapi_declares_health_and_day4_routes(client):
     schema = client.get("/openapi.json").json()
 
     assert set(schema["paths"]) == {
         "/api/health", "/api/ingredients", "/api/recommendations/status", "/api/recommendations/generate",
+        "/api/photos/match",
     }
     assert set(schema["paths"]["/api/health"]) == {"get"}
+    assert set(schema["paths"]["/api/photos/match"]) == {"post"}

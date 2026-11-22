@@ -170,8 +170,12 @@
 .detail-page { max-width: 1160px; margin: 16px auto 0; }
 .detail-toolbar { display: flex; justify-content: space-between; align-items: center; min-height: 66px; margin-bottom: 12px; font-size: 12px; color: var(--color-muted); }
 .detail-top { display: grid; grid-template-columns: 1.12fr 1fr; align-items: stretch; gap: 42px; }
-.detail-photo { position: relative; overflow: hidden; border-radius: 28px; }
+.detail-photo { position: relative; border-radius: 28px; }
+.detail-photo-frame { position: relative; overflow: hidden; border-radius: inherit; }
 .detail-photo .food-image { min-height: 380px; }
+.photo-badge { position: absolute; right: 12px; bottom: 12px; padding: 5px 10px; border-radius: 999px; background: #fffffff0; color: #7e4a0b; font-size: 10px; letter-spacing: 1px; pointer-events: none; }
+.photo-attribution { margin: 10px 4px 0; color: #756957; font-size: 11px; line-height: 1.7; }
+.photo-attribution a { color: var(--color-accent-text); text-decoration: underline; text-underline-offset: 2px; }
 .photo-caption { position: absolute; left: 20px; bottom: 20px; display: flex; gap: 8px; align-items: center; padding: 9px 13px; border-radius: 10px; background: #fffffff0; color: #6e5f47; font-size: 11px; }
 .detail-intro { padding: 10px 0 12px; }
 .detail-eyebrow { display: flex; justify-content: space-between; color: var(--color-accent-text); font-size: 11px; letter-spacing: 1px; margin-bottom: 12px; }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import catalog from '../../../backend/app/data/ingredients.json'
-import { fetchEngineStatus, generateRecipes, parseGeneration, snapshots, toRecipe, validSnapshot } from './generation'
-import type { EngineStatus, GeneratedDish, GeneratedIngredient, GenerationRequest, GenerationResponse, Scene } from './generation'
+import { fetchEngineStatus, generateRecipes, parseGeneration, snapshots, toRecipe, validPhoto, validSnapshot } from './generation'
+import type { DishPhoto, EngineStatus, GeneratedDish, GeneratedIngredient, GenerationRequest, GenerationResponse, Scene } from './generation'
 
 const statusUrl = '/api/recommendations/status'
 const generateUrl = '/api/recommendations/generate'
@@ -227,7 +227,7 @@ describe('Day 3 generated DTO validation', () => {
     { label: 'incorrect seasoning role', patch: () => ({ ingredients: [{ ...ingredient('garlic', '1 瓣'), role: 'main' }] }) },
     { label: 'non-string amount', patch: (dish) => ({ ingredients: [{ ...dish.ingredients[0], amount: 200 }] }) },
     { label: 'unknown missing ingredient', patch: () => ({ missingIngredients: [{ ingredientId: 'unknown', name: '未知', role: 'main', amount: '1' }] }) },
-    { label: 'only one cooking step', patch: (dish) => ({ cookingSteps: dish.cookingSteps.slice(0, 1) }) },
+    { label: 'no cooking steps in a cook dish', patch: () => ({ cookingSteps: [] }) },
     { label: 'step missing its body', patch: (dish) => ({ cookingSteps: [{ ...dish.cookingSteps[0], body: undefined }, dish.cookingSteps[1]] }) },
     { label: 'unknown step ingredient ID', patch: (dish) => ({ cookingSteps: [{ ...dish.cookingSteps[0], ingredientIds: ['unknown-food'] }, dish.cookingSteps[1]] }) },
     { label: 'step ingredient not in the recipe', patch: (dish) => ({ cookingSteps: [{ ...dish.cookingSteps[0], ingredientIds: ['chicken-breast'] }, dish.cookingSteps[1]] }) },
@@ -247,11 +247,109 @@ describe('Day 3 generated DTO validation', () => {
     expect(validSnapshot({ recipe: malformed.recipes[0], source: response.source, model: response.model, scene: response.scene, servings: response.servings })).toBe(false)
   })
 
+  it('accepts a concise single-step cook dish whose steps carry no ingredient references', () => {
+    const response = responseFor()
+    const dish = response.recipes[0]
+    const concise = withDish(response, { cookingSteps: [{ title: '步骤1', body: dish.cookingSteps[0].body, ingredientIds: [] }] })
+    expect(parseGeneration(concise)).toEqual(concise)
+    expect(validSnapshot({ recipe: concise.recipes[0], source: response.source, model: response.model, scene: response.scene, servings: response.servings })).toBe(true)
+    expect(toRecipe(snapshots(concise)[0]).steps).toHaveLength(1)
+  })
+
   it.each(['steps', 'time'] as const)('rejects eat_out output that contains cooking %s', (field) => {
     const response = responseFor('eat_out')
     if (field === 'steps') response.recipes[0].cookingSteps = responseFor().recipes[0].cookingSteps
     if (field === 'time') response.recipes[0].estimatedTime = 20
     expect(() => parseGeneration(response)).toThrow()
     expect(validSnapshot(snapshots(response)[0])).toBe(false)
+  })
+})
+
+describe('Day 4 dish photo metadata', () => {
+  const photo: DishPhoto = {
+    url: 'https://api.openverse.org/v1/images/0e1c4e2a-0000-4000-8000-000000000001/thumb/',
+    alt: 'Stir fried tomato and egg',
+    photographer: 'Test Photographer',
+    photographerUrl: 'https://www.flickr.com/people/test-photographer/',
+    pageUrl: 'https://www.flickr.com/photos/test-photographer/12345/',
+    width: 1200, height: 800, license: 'CC BY 4.0', licenseUrl: 'https://creativecommons.org/licenses/by/4.0/', source: 'openverse',
+  }
+
+  it('accepts a well-formed Openverse photo and keeps snapshots without a photo valid', () => {
+    expect(validPhoto(photo)).toBe(true)
+    const snapshot = snapshots(responseFor())[0]
+    expect(snapshot.photo).toBeUndefined()
+    expect(validSnapshot(snapshot)).toBe(true)
+    expect(validSnapshot({ ...snapshot, photo })).toBe(true)
+  })
+
+  it('accepts any HTTPS landing and creator host because sources vary', () => {
+    expect(validPhoto({ ...photo, pageUrl: 'https://commons.wikimedia.org/wiki/File:Tomato_eggs.jpg', photographerUrl: 'https://commons.wikimedia.org/wiki/User:X' })).toBe(true)
+  })
+
+  const invalidPhotos: { label: string; patch: Record<string, unknown> }[] = [
+    { label: 'http thumbnail url', patch: { url: 'http://api.openverse.org/v1/images/x/thumb/' } },
+    { label: 'foreign thumbnail host', patch: { url: 'https://evil.example/x/thumb/' } },
+    { label: 'thumbnail without thumb suffix', patch: { url: 'https://api.openverse.org/v1/images/x/' } },
+    { label: 'non-image thumbnail path', patch: { url: 'https://api.openverse.org/v1/audio/x/thumb/' } },
+    { label: 'http page url', patch: { pageUrl: 'http://www.flickr.com/photos/x/1/' } },
+    { label: 'credentials in page url', patch: { pageUrl: 'https://user:pass@flickr.com/x/' } },
+    { label: 'fragment in page url', patch: { pageUrl: 'https://flickr.com/x/#frag' } },
+    { label: 'http photographer url', patch: { photographerUrl: 'http://www.flickr.com/people/x/' } },
+    { label: 'foreign license host', patch: { licenseUrl: 'https://evil.example/licenses/by/4.0/' } },
+    { label: 'http license url', patch: { licenseUrl: 'http://creativecommons.org/licenses/by/4.0/' } },
+    { label: 'missing license url', patch: { licenseUrl: undefined } },
+    { label: 'missing license label', patch: { license: undefined } },
+    { label: 'blank license label', patch: { license: '  ' } },
+    { label: 'whitespace in url', patch: { url: 'https://api.openverse.org/v1/images/x /thumb/' } },
+    { label: 'backslash in url', patch: { url: 'https://api.openverse.org\\v1/images/x/thumb/' } },
+    { label: 'missing alt', patch: { alt: undefined } },
+    { label: 'blank alt', patch: { alt: '   ' } },
+    { label: 'oversized alt', patch: { alt: 'x'.repeat(301) } },
+    { label: 'blank photographer', patch: { photographer: ' ' } },
+    { label: 'unknown source', patch: { source: 'scraper' } },
+    { label: 'legacy pexels source', patch: { source: 'pexels' } },
+    { label: 'fractional width', patch: { width: 1200.5 } },
+    { label: 'zero width', patch: { width: 0 } },
+    { label: 'oversized height', patch: { height: 10001 } },
+  ]
+
+  it.each(invalidPhotos)('rejects unsafe photo metadata: $label', ({ patch }) => {
+    expect(validPhoto({ ...photo, ...patch })).toBe(false)
+    expect(validSnapshot({ ...snapshots(responseFor())[0], photo: { ...photo, ...patch } })).toBe(false)
+  })
+
+  it.each([null, [], 'photo', 42])('rejects non-object photo values: %s', (value) => {
+    expect(validPhoto(value)).toBe(false)
+  })
+
+  it('maps a matched photo to the recipe image, honest alt text and Openverse attribution', () => {
+    const snapshot = { ...snapshots(responseFor())[0], photo }
+    const recipe = toRecipe(snapshot)
+    expect(recipe.image).toBe(photo.url)
+    expect(recipe.photoAlt).toBe(`${snapshot.recipe.name}的菜品示意图，非本菜谱实际成品`)
+    expect(recipe.credit).toEqual({
+      author: 'Test Photographer（Openverse）', sourceUrl: photo.pageUrl,
+      license: 'CC BY 4.0', licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+    })
+    expect(recipe.generation).toEqual(snapshot)
+  })
+
+  it('carries the exact license label from the backend, including CC0 and PDM', () => {
+    for (const license of ['CC0 1.0', 'Public Domain Mark 1.0', 'CC BY 2.0']) {
+      const recipe = toRecipe({ ...snapshots(responseFor())[0], photo: { ...photo, license } })
+      expect(recipe.credit.license).toBe(license)
+    }
+  })
+
+  it('keeps the original placeholder credit when no photo matched', () => {
+    const recipe = toRecipe(snapshots(responseFor())[0])
+    expect(recipe.image).toBe('')
+    expect(recipe.photoAlt).toMatch(/占位.*非实物照片/)
+    expect(recipe.credit.license).toBe('项目原创')
+  })
+
+  it('never fabricates photo metadata when snapshotting a fresh response', () => {
+    for (const snapshot of snapshots(responseFor())) expect(snapshot.photo).toBeUndefined()
   })
 })

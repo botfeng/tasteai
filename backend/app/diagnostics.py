@@ -16,13 +16,9 @@ CODES = frozenset("""not_configured recommendations_disabled provider_timeout pr
 provider_response_invalid invalid_model_output credential_echo rate_limit limiter_capacity
 invalid_json invalid_json_or_schema recipe_count duplicate_recipe duplicate_ingredient
 ingredient_identity ingredient_amount no_main_ingredient no_selected_main strict_main_ingredient
-basics_disabled missing_ingredients_mismatch invalid_text unsupported_claim_or_url
-unselected_preference unselected_preference_reason unsupported_preference unsupported_flavor
-hidden_ingredient dining_cooking_fields dining_fields merchant_facts cooking_dining_fields
-time_limit non_executable_steps step_ingredient_reference hidden_step_ingredient
-raw_food_instructions uncatalogued_food mock_constraints_unsupported""".split())
+basics_disabled invalid_text missing_steps time_limit mock_constraints_unsupported""".split())
 FIELDS = frozenset("""recipes name description ingredients ingredientId amount role cookingSteps
-title body ingredientIds estimatedTime recommendationReason missingIngredients imageFallbackCategory
+title body ingredientIds steps estimatedTime recommendationReason missingIngredients imageFallbackCategory
 diningCategory orderingTip matchedPreferences""".split())
 
 
