@@ -14,6 +14,7 @@ export type GenerationRequest = {
   strictIngredients: boolean
   assumeBasics: boolean
   maxRecipes?: number
+  excludedRecipeNames?: string[]
 }
 export type GeneratedIngredient = { ingredientId: string; name: string; amount: string; role: 'main' | 'seasoning' }
 export type GeneratedDish = {

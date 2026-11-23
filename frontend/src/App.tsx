@@ -6,6 +6,7 @@ import type { GeneratedSnapshot, GenerationResponse } from './data/generation'
 import { attachPhoto, matchDishPhotos } from './data/photos'
 import type { PhotoMap } from './data/photos'
 import { useGeneration } from './data/useGeneration'
+import { clearHistory, exclusionNames, readHistory, recordRecommendations } from './data/history'
 import GenerationPanel from './components/GenerationPanel'
 import { recipes } from './data/recipes'
 import type { BudgetBand, DiningMode, Recipe } from './data/recipes'
@@ -44,7 +45,9 @@ export default function App() {
   const [hash, setHash] = useState(() => window.location.hash || '#home')
   const [state, setState] = useState<DemoState>(readDemoState)
   const [tasteFilter, setTasteFilter] = useState('全部')
-  const [quickTime, setQuickTime] = useState(false)
+  const [timeChoice, setTimeChoice] = useState(() => state.preferences.maxMinutes)
+  const [servings, setServings] = useState(1)
+  const [history, setHistory] = useState(readHistory)
   const [mode, setMode] = useState<DiningMode>('cook')
   const [budget, setBudget] = useState<'any' | BudgetBand>('any')
   const [batch, setBatch] = useState(0)
@@ -78,6 +81,12 @@ export default function App() {
   const registerGenerated = useCallback((response: GenerationResponse) => {
     setGenerated((current) => [...current, ...snapshots(response)].slice(-100))
     setBatch(0)
+    if (response.scene === 'cook') setHistory(recordRecommendations(response.recipes.map((dish) => dish.name)))
+    requestPhotos(response)
+  }, [requestPhotos])
+  const registerReplacement = useCallback((response: GenerationResponse) => {
+    setGenerated((current) => [...current, ...snapshots(response)].slice(-100))
+    setHistory(recordRecommendations(response.recipes.map((dish) => dish.name)))
     requestPhotos(response)
   }, [requestPhotos])
   const allRecipes = useMemo(() => [...recipes, ...new Map([...(state.generatedSnapshots ?? []), ...generated].map((item) => [item.recipe.id, toRecipe(attachPhoto(item, photos))])).values()], [state.generatedSnapshots, generated, photos])
@@ -90,7 +99,7 @@ export default function App() {
   const isDetail = hash.startsWith('#recipe/')
   const recipe = isDetail ? allRecipes.find((item) => item.id === hash.slice('#recipe/'.length).split('?')[0]) : undefined
   const detailMode: DiningMode = recipe?.generation ? recipe.generation.scene === 'eat_out' ? 'out' : 'cook' : new URLSearchParams(hash.split('?')[1]).get('mode') === 'out' ? 'out' : 'cook'
-  const generation = useGeneration({ scene: mode === 'out' ? 'eat_out' : 'cook', ingredientIds: [], tastePreferences: state.preferences.tastes, todayTaste: tasteFilter === '全部' ? null : tasteFilter, preferredCategories: state.preferences.ingredients, timeLimit: mode === 'cook' ? (quickTime ? Math.min(state.preferences.maxMinutes || 15, 15) : state.preferences.maxMinutes || null) : null, budgetLevel: mode === 'out' ? budget : null, servings: 1, strictIngredients: true, assumeBasics: true }, registerGenerated, !isDetail && !isSaved && !isPreferences && !isFridge)
+  const generation = useGeneration({ scene: mode === 'out' ? 'eat_out' : 'cook', ingredientIds: [], tastePreferences: state.preferences.tastes, todayTaste: tasteFilter === '全部' ? null : tasteFilter, preferredCategories: state.preferences.ingredients, timeLimit: mode === 'cook' ? (timeChoice || null) : null, budgetLevel: mode === 'out' ? budget : null, servings, strictIngredients: true, assumeBasics: true, maxRecipes: mode === 'cook' ? 3 : undefined }, registerGenerated, !isDetail && !isSaved && !isPreferences && !isFridge, registerReplacement)
   const recipeHref = (id: string) => `#recipe/${id}${mode === 'out' ? '?mode=out' : ''}`
 
   useEffect(() => {
@@ -154,20 +163,22 @@ export default function App() {
   function completePreferences(preferences: Preferences) {
     persist({ ...state, preferences }, '口味已记下，来看看这一餐的灵感。')
     setTasteFilter('全部')
-    setQuickTime(false)
+    setTimeChoice(preferences.maxMinutes)
     setBatch(0)
     window.location.hash = '#home'
   }
 
-  const recommendations = generation.result ? snapshots(generation.result).map((item) => ({ recipe: toRecipe(attachPhoto(item, photos)), reasons: [item.recipe.recommendationReason] })) : recommendByPreference(recipes, { mode, preferences: state.preferences, taste: tasteFilter, maxMinutes: quickTime ? 15 : 0, budget, saved: state.saved })
+  const recommendations = generation.result ? snapshots(generation.result).map((item) => ({ recipe: toRecipe(attachPhoto(item, photos)), reasons: [item.recipe.recommendationReason] })) : recommendByPreference(recipes, { mode, preferences: state.preferences, taste: tasteFilter, maxMinutes: timeChoice, budget, saved: state.saved })
   const offset = recommendations.length ? batch % recommendations.length : 0
   const ordered = [...recommendations.slice(offset), ...recommendations.slice(0, offset)]
   const featuredResult = ordered[0]
   const featured = featuredResult?.recipe
+  const canReplace = mode === 'cook' && !!generation.result && !generation.loading
+  const replaceExclusions = generation.result ? exclusionNames(generation.result.recipes.map((dish) => dish.name), history) : []
   const savedRecipes = allRecipes.filter((item) => state.saved.includes(item.id))
   const preferenceSummary = [...state.preferences.tastes, ...state.preferences.ingredients, ...(mode === 'cook' && state.preferences.maxMinutes ? [`${state.preferences.maxMinutes} 分钟内`] : [])].join(' · ') || '不设限，什么好吃就吃什么'
   const pantry = isDetail && returnTo.current === '#fridge' ? readPantry() : null
-  const detailReasons = pantry ? recommendByIngredients(recipes, { ingredients: pantry.items, assumeBasics: pantry.assumeBasics, preferences: state.preferences, saved: state.saved }).find((item) => item.recipe.id === recipe?.id)?.reasons : recommendByPreference(recipes, { mode: detailMode, preferences: state.preferences, taste: tasteFilter, maxMinutes: quickTime ? 15 : 0, budget, saved: state.saved }).find((item) => item.recipe.id === recipe?.id)?.reasons
+  const detailReasons = pantry ? recommendByIngredients(recipes, { ingredients: pantry.items, assumeBasics: pantry.assumeBasics, preferences: state.preferences, saved: state.saved }).find((item) => item.recipe.id === recipe?.id)?.reasons : recommendByPreference(recipes, { mode: detailMode, preferences: state.preferences, taste: tasteFilter, maxMinutes: timeChoice, budget, saved: state.saved }).find((item) => item.recipe.id === recipe?.id)?.reasons
 
   if (hash === '#service') return <ServiceStatus />
 
@@ -201,27 +212,37 @@ export default function App() {
                 </label>)}
               </fieldset>
               <label className="budget-select"><span>更多口味</span><select aria-label="今天的口味" value={tasteFilter} onChange={(event) => { setTasteFilter(event.target.value); setBatch(0) }}><option value="全部">不限制口味</option>{tasteOptions.map((option) => <option key={option.label} value={option.label}>{option.label}</option>)}</select></label>
-              {mode === 'cook' ? <button type="button" className="time-filter" aria-pressed={quickTime} onClick={() => { setQuickTime((current) => !current); setBatch(0) }}><Icon name={quickTime ? 'check' : 'clock'} size={16} />15 分钟快手</button> : <label className="budget-select"><span>预算偏好</span><select aria-label="预算偏好" value={budget} onChange={(event) => { setBudget(event.target.value as typeof budget); setBatch(0) }}>{budgetOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
+              {mode === 'cook' ? <div className="time-choices" role="group" aria-label="可接受用时">{([{ value: 0, label: '不限时间' }, { value: 15, label: '15 分钟快手' }, { value: 30, label: '30 分钟' }, { value: 60, label: '60 分钟' }] as const).map((option) => <button key={option.value} type="button" className="time-filter" aria-pressed={timeChoice === option.value} onClick={() => { setTimeChoice((current) => option.value !== 0 && current === option.value ? 0 : option.value); setBatch(0) }}><Icon name={option.value !== 0 && timeChoice === option.value ? 'check' : 'clock'} size={16} />{option.label}</button>)}</div> : <label className="budget-select"><span>预算偏好</span><select aria-label="预算偏好" value={budget} onChange={(event) => { setBudget(event.target.value as typeof budget); setBatch(0) }}>{budgetOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
             </div>
+            {mode === 'cook' && <details className="more-conditions">
+              <summary><Icon name="sliders" size={15} />更多条件<span className="more-conditions-hint">用餐人数 · 推荐历史</span></summary>
+              <div className="more-conditions-body">
+                <label className="budget-select"><span>用餐人数</span><select aria-label="用餐人数" value={servings} onChange={(event) => { setServings(Number(event.target.value)); setBatch(0) }}>{[1, 2, 3, 4, 5, 6].map((count) => <option key={count} value={count}>{count} 人</option>)}</select></label>
+                <div className="history-note">
+                  <p>{history.length ? `已记住最近 ${history.length} 道推荐菜名，「帮我决定」和「换一道」会尽量避开它们。` : '生成后会自动记住最近推荐的菜名（最多 20 道，仅存本机），新推荐尽量不重复。'}</p>
+                  <button type="button" className="text-button" disabled={!history.length} onClick={() => { setHistory(clearHistory()); setNotice({ text: '已清除推荐历史，之后的推荐不再避开旧菜名。' }) }}><Icon name="close" size={14} />清除推荐历史</button>
+                </div>
+              </div>
+            </details>}
             {mode === 'out' && <p className="mode-disclaimer">预算为菜品相对成本的示例估计，仅影响推荐顺序，不是商家报价。这里只推荐菜品，不提供餐厅、位置或营业信息。</p>}
             {state.preferences.configured && <p className="filter-summary">按口味档案筛选：{preferenceSummary}<a href="#preferences">调整</a></p>}
-            <GenerationPanel generation={generation} />
+            <GenerationPanel generation={generation} label={mode === 'cook' ? '帮我决定' : 'AI 帮我推荐'} excludedRecipeNames={mode === 'cook' ? history : []} />
             {featured ? <div className="home-layout">
               <section className="featured-section" aria-labelledby="featured-title">
                 <div className="section-heading"><div><span className="section-dot" /><h2 id="featured-title">今天，就吃这道吧</h2></div>{(!generation.result || ordered.length > 3) && <button className="text-button shuffle-button" type="button" disabled={ordered.length < 2} onClick={() => { setBatch((current) => current + 1); setNotice({ text: generation.result ? `已切换本次候选，共 ${ordered.length} 道；未再次请求 AI。` : `已切换主推，当前共有 ${ordered.length} 道匹配的 Demo 菜谱。` }) }}><Icon name="refresh" size={15} />{generation.result ? '浏览本次候选' : '换一批'}</button>}</div>
                 <article className="featured-card" aria-label="今日主推菜谱">
-                  <div className="featured-visual"><a href={recipeHref(featured.id)} aria-label={`查看${featured.name}${mode === 'cook' ? '做法' : '点餐建议'}`}><FoodImage key={featured.id} src={featured.image} alt={featured.photoAlt} category={featured.generation?.recipe.imageFallbackCategory ?? featured.imageFallbackCategory} priority illustrative={!!featured.generation?.photo} /></a><span className="featured-badge"><Icon name="spark" size={14} />{mode === 'cook' ? '今日主推' : '今日点餐灵感'}</span><SaveButton recipe={featured} saved={state.saved.includes(featured.id)} onToggle={toggleSave} /><span className="image-note">一人食，也要认真吃</span></div>
-                  <div className="featured-copy"><div className="featured-name"><div><span className="recipe-kicker">{featured.kicker}</span><h3>{featured.name}</h3></div>{mode === 'cook' ? <span className="recipe-time"><Icon name="clock" size={17} /><strong>{featured.minutes}</strong> 分钟</span> : <span className="dining-category"><Icon name="dining" size={17} />{featured.dining.category}</span>}</div><p className="featured-reason"><Icon name="spark" size={15} />{featuredResult.reasons.join('；')}</p>{mode === 'out' && <p className="ordering-preview">{featured.dining.orderingTip}</p>}<div className="featured-bottom"><div className="tag-row">{featured.tastes.slice(0, 2).map((taste) => <span key={taste}>{taste}</span>)}<span>{mode === 'cook' ? featured.difficulty : '菜品灵感'}</span></div><a className="primary-button" href={recipeHref(featured.id)}>{mode === 'cook' ? '看看做法' : '点餐建议'}<Icon name="arrow" size={17} /></a></div></div>
+                  <div className="featured-visual"><a href={recipeHref(featured.id)} aria-label={`查看${featured.name}${mode === 'cook' ? '做法' : '点餐建议'}`}><FoodImage key={featured.id} src={featured.image} alt={featured.photoAlt} category={featured.generation?.recipe.imageFallbackCategory ?? featured.imageFallbackCategory} priority illustrative={!!featured.generation?.photo} /></a><span className="featured-badge"><Icon name="spark" size={14} />{mode === 'cook' ? '今日主推' : '今日点餐灵感'}</span><SaveButton recipe={featured} saved={state.saved.includes(featured.id)} onToggle={toggleSave} /><span className="image-note">{servings === 1 ? '一人食，也要认真吃' : `${servings} 人份，也要认真吃`}</span>{canReplace && generation.replacing.includes(featured.id) && <div className="swap-overlay" role="status"><span className="generation-progress" aria-hidden="true" /><span>正在换一道…</span></div>}</div>
+                  <div className="featured-copy"><div className="featured-name"><div><span className="recipe-kicker">{featured.kicker}</span><h3>{featured.name}</h3></div>{mode === 'cook' ? <span className="recipe-time"><Icon name="clock" size={17} /><strong>{featured.minutes}</strong> 分钟</span> : <span className="dining-category"><Icon name="dining" size={17} />{featured.dining.category}</span>}</div><p className="featured-reason"><Icon name="spark" size={15} />{featuredResult.reasons.join('；')}</p>{mode === 'out' && <p className="ordering-preview">{featured.dining.orderingTip}</p>}{canReplace && generation.replaceErrors[featured.id] && <p className="swap-error" role="alert">{generation.replaceErrors[featured.id]}</p>}<div className="featured-bottom"><div className="tag-row">{featured.tastes.slice(0, 2).map((taste) => <span key={taste}>{taste}</span>)}<span>{mode === 'cook' ? featured.difficulty : '菜品灵感'}</span></div><div className="featured-actions">{canReplace && <button type="button" className="text-button swap-button" disabled={generation.replacing.includes(featured.id)} onClick={() => void generation.replaceRecipe(featured.id, replaceExclusions)}><Icon name="refresh" size={14} />{generation.replacing.includes(featured.id) ? '正在换一道…' : '换一道'}</button>}<a className="primary-button" href={recipeHref(featured.id)}>{mode === 'cook' ? '看看做法' : '点餐建议'}<Icon name="arrow" size={17} /></a></div></div></div>
                 </article>
-                <p className="ranking-note">{generation.result ? `本次生成 ${recommendations.length} 道菜品；重新生成会重新请求后端，不是轮换原有示例。` : `按规则得分排序，同分按菜谱库顺序。换一批按此顺序轮换主推，不生成新菜；当前第 ${offset + 1} / ${recommendations.length} 道。`}</p>
+                <p className="ranking-note">{generation.result ? `本次生成 ${recommendations.length} 道菜品；「重新生成一批」会重新请求后端，「换一道」只替换对应卡片，同样各计一次请求。` : `按规则得分排序，同分按菜谱库顺序。换一批按此顺序轮换主推，不生成新菜；当前第 ${offset + 1} / ${recommendations.length} 道。`}</p>
               </section>
               <aside className="more-section">
                 <div className="section-heading"><h2>再来一点灵感</h2><span className="section-caption">{ordered.length > 1 ? '换个口味，也不错' : '慢慢找到喜欢的'}</span></div>
-                {ordered.length > 1 ? <div className="more-grid">{ordered.slice(1, 3).map((item) => <RecipeCard key={item.recipe.id} recipe={item.recipe} mode={mode} reasons={item.reasons} saved={state.saved.includes(item.recipe.id)} onToggle={toggleSave} />)}</div> : <p className="single-match">{generation.result ? '本次仅返回这一道通过校验的候选。' : '目前只有这道 Demo 菜谱符合选择。'}<a href="#preferences">调整口味</a>，看看其他灵感。</p>}
+                {ordered.length > 1 ? <div className="more-grid">{ordered.slice(1, 3).map((item) => <RecipeCard key={item.recipe.id} recipe={item.recipe} mode={mode} reasons={item.reasons} saved={state.saved.includes(item.recipe.id)} onToggle={toggleSave} onReplace={canReplace ? () => void generation.replaceRecipe(item.recipe.id, replaceExclusions) : undefined} replacing={generation.replacing.includes(item.recipe.id)} replaceError={generation.replaceErrors[item.recipe.id] ?? ''} />)}</div> : <p className="single-match">{generation.result ? '本次仅返回这一道通过校验的候选。' : '目前只有这道 Demo 菜谱符合选择。'}<a href="#preferences">调整口味</a>，看看其他灵感。</p>}
                 <a className="preference-note" href="#preferences"><span className="note-icon"><Icon name="leaf" size={26} /></span><div><span className="small-eyebrow">每一口，都更懂你一点</span><h3>你的口味，你说了算</h3><p>清爽或浓郁，快手或慢慢做。<br />下一顿，从你喜欢的开始。</p><span className="note-link">{state.preferences.configured ? '调整我的口味' : '定制我的口味'}<Icon name="arrow" size={16} /></span></div><Icon name="leaf" size={98} /></a>
                 <div className="quiet-note"><Icon name="bowl" size={18} /><span>好好吃饭，是照顾自己的小事。</span></div>
               </aside>
-            </div> : <section className="empty-state"><span className="empty-icon"><Icon name="bowl" size={36} /></span><h2>这个口味，还在准备中</h2><p>目前只有 {recipes.length} 道 Demo 菜谱，没有符合全部条件的选择。<br />可以调整口味，或清除筛选查看全部。</p><div className="empty-actions"><a href="#preferences" className="secondary-button">调整口味</a><button type="button" className="primary-button" onClick={() => { setTasteFilter('全部'); setQuickTime(false); setBudget('any'); setBatch(0); persist({ ...state, preferences: emptyPreferences() }, '已清除筛选，显示全部 Demo 菜谱。') }}>查看全部菜谱<Icon name="arrow" size={17} /></button></div></section>}
+            </div> : <section className="empty-state"><span className="empty-icon"><Icon name="bowl" size={36} /></span><h2>这个口味，还在准备中</h2><p>目前只有 {recipes.length} 道 Demo 菜谱，没有符合全部条件的选择。<br />可以调整口味，或清除筛选查看全部。</p><div className="empty-actions"><a href="#preferences" className="secondary-button">调整口味</a><button type="button" className="primary-button" onClick={() => { setTasteFilter('全部'); setTimeChoice(0); setBudget('any'); setBatch(0); persist({ ...state, preferences: emptyPreferences() }, '已清除筛选，显示全部 Demo 菜谱。') }}>查看全部菜谱<Icon name="arrow" size={17} /></button></div></section>}
           </>}
         </main>
       )}

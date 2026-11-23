@@ -440,16 +440,25 @@ def test_generic_default_retains_exactly_one_sanitized_repair(repair_succeeds):
     assert len(calls) == service.limiter.attempts == 2 and service.limiter.active == 0
 
 
-@pytest.mark.parametrize("value", [3, 4, 5])
+@pytest.mark.parametrize("value", [1, 2, 3, 4, 5])
 def test_max_recipes_default_and_valid_bounds(value):
     assert RecommendationRequest(scene="cook").maxRecipes == 5
     assert RecommendationRequest(scene="cook", maxRecipes=value).maxRecipes == value
 
 
-@pytest.mark.parametrize("value", [2, 6, -1, True, False, 3.0, "3", None])
+@pytest.mark.parametrize("value", [0, 6, -1, True, False, 3.0, "3", None])
 def test_max_recipes_rejects_out_of_range_or_coerced_input(value):
     with pytest.raises(ValidationError):
         RecommendationRequest(scene="cook", maxRecipes=value)
+
+
+@pytest.mark.parametrize("scene", ["eat_out", "fridge"])
+def test_small_max_recipes_and_exclusions_are_cook_only(scene):
+    body = {"scene": scene, "ingredientIds": ["tomato", "egg"]} if scene == "fridge" else {"scene": scene}
+    with pytest.raises(ValidationError):
+        RecommendationRequest.model_validate({**body, "maxRecipes": 1})
+    with pytest.raises(ValidationError):
+        RecommendationRequest.model_validate({**body, "excludedRecipeNames": ["番茄炒蛋"]})
 
 
 @pytest.mark.parametrize("scene", ["cook", "eat_out", "fridge"])

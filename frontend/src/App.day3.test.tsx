@@ -90,7 +90,7 @@ function panel() {
 }
 
 async function generateButton() {
-  const button = panel().getByRole('button', { name: /推荐|生成/ })
+  const button = panel().getByRole('button', { name: /推荐|生成|帮我决定/ })
   await waitFor(() => expect(button).toBeEnabled())
   return button
 }
@@ -128,7 +128,7 @@ describe('Day 3 generation availability and results', () => {
     statusFetch.mockResolvedValue(json(status))
     render(<App />)
     await waitFor(() => expect(panel().getByText(status.message)).toBeVisible())
-    const button = panel().getByRole('button', { name: /推荐/ })
+    const button = panel().getByRole('button', { name: /推荐|帮我决定/ })
     expect(button).toBeDisabled()
     fireEvent.click(button)
     expect(generationFetch).not.toHaveBeenCalled()
@@ -145,7 +145,7 @@ describe('Day 3 generation availability and results', () => {
     const pending = deferred<Response>()
     statusFetch.mockReturnValue(pending.promise)
     render(<App />)
-    expect(panel().getByRole('button', { name: /推荐/ })).toBeDisabled()
+    expect(panel().getByRole('button', { name: /推荐|帮我决定/ })).toBeDisabled()
     expectSeeds()
     expect(generationFetch).not.toHaveBeenCalled()
     await act(async () => { pending.resolve(json(readyStatus)) })
@@ -157,7 +157,7 @@ describe('Day 3 generation availability and results', () => {
     statusFetch.mockRejectedValueOnce(new TypeError('offline'))
     render(<App />)
     await waitFor(() => expect(panel().getByText(/无法连接/)).toBeVisible())
-    expect(panel().getByRole('button', { name: /推荐/ })).toBeDisabled()
+    expect(panel().getByRole('button', { name: /推荐|帮我决定/ })).toBeDisabled()
     expectSeeds()
     fireEvent.click(panel().getByRole('button', { name: /检查服务/ }))
     expect(await generateButton()).toBeEnabled()
@@ -219,24 +219,16 @@ describe('Day 3 generation availability and results', () => {
     expect(generationFetch).toHaveBeenCalledTimes(2)
   })
 
-  it('browses five generated candidates in the one-plus-two layout without another API call', async () => {
+  it('rejects a cook batch larger than the requested three dishes instead of silently trimming', async () => {
     const response = responseFor()
     response.recipes.push(...response.recipes.slice(0, 2).map((recipe, index) => ({ ...recipe, id: `extra-${index}`, name: `${recipe.name}第二组` })))
-    generationFetch.mockImplementation(async () => json(response))
-    const { container } = render(<App />)
+    generationFetch.mockResolvedValue(json(response))
+    render(<App />)
     await generate()
-    await screen.findByRole('heading', { name: response.recipes[0].name })
-    expect(container.querySelectorAll('.more-grid .recipe-card')).toHaveLength(2)
-    fireEvent.click(screen.getByRole('button', { name: '浏览本次候选' }))
-    fireEvent.click(screen.getByRole('button', { name: '浏览本次候选' }))
-    expect(screen.getByRole('heading', { name: response.recipes[4].name })).toBeVisible()
-    expect(container.querySelectorAll('.featured-card')).toHaveLength(1)
-    expect(container.querySelectorAll('.more-grid .recipe-card')).toHaveLength(2)
-    expect(generationFetch).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('status')).toHaveTextContent('未再次请求 AI')
-    await generate()
-    await waitFor(() => expect(within(screen.getByRole('article', { name: '今日主推菜谱' })).getByRole('heading')).toHaveTextContent(response.recipes[0].name))
-    expect(generationFetch).toHaveBeenCalledTimes(2)
+    expect(generationFetch.mock.calls[0][0].maxRecipes).toBe(3)
+    expect(await panel().findByRole('alert')).toHaveTextContent('数据不完整')
+    expectSeeds()
+    expect(screen.queryByRole('button', { name: '浏览本次候选' })).not.toBeInTheDocument()
   })
 
   it('posts again for regeneration and replaces the batch rather than rotating local dishes', async () => {
@@ -249,7 +241,7 @@ describe('Day 3 generation availability and results', () => {
     await generate()
     await expectBatch(second)
     expect(generationFetch).toHaveBeenCalledTimes(2)
-    expect(generationFetch.mock.calls[1][0]).toEqual(generationFetch.mock.calls[0][0])
+    expect(generationFetch.mock.calls[1][0]).toEqual({ ...generationFetch.mock.calls[0][0], excludedRecipeNames: first.recipes.map((recipe) => recipe.name) })
     for (const recipe of first.recipes) expect(screen.queryByRole('heading', { name: recipe.name })).not.toBeInTheDocument()
     for (const seed of seeds) expect(screen.queryByRole('heading', { name: seed.name })).not.toBeInTheDocument()
   })
@@ -273,6 +265,7 @@ describe('Day 3 generation requests and fridge constraints', () => {
       scene, ingredientIds: [], tastePreferences: preferences.tastes, todayTaste: '清爽',
       preferredCategories: preferences.ingredients, timeLimit: scene === 'cook' ? 15 : null,
       budgetLevel: scene === 'eat_out' ? 'economy' : null, servings: 1, strictIngredients: true, assumeBasics: true,
+      ...(scene === 'cook' ? { maxRecipes: 3 } : {}),
     })
     expect(fetchMock).toHaveBeenCalledWith(generateUrl, expect.objectContaining({
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: expect.any(AbortSignal),

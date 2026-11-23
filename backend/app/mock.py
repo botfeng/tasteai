@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from app.catalog import BASIC_IDS, BY_ID
 from app.errors import RecommendationError
 from app.schemas import RecommendationRequest
-from app.validation import supported_preferences
+from app.validation import normalize_name, supported_preferences
 
 
 @dataclass(frozen=True)
@@ -130,9 +130,15 @@ class MockClient:
         # Rank useful matches first; alternate subsets from ten genuinely different recipes.
         candidates.sort(key=lambda item: (request.todayTaste in item[1] if request.todayTaste else False,
                                           len(item[1])), reverse=True)
-        if len(candidates) < 3 and request.scene != "fridge":
+        excluded = {normalize_name(value) for value in request.excludedRecipeNames}
+        if excluded:
+            candidates = [item for item in candidates if normalize_name(item[0]["name"]) not in excluded]
+            if not candidates and request.scene != "fridge":
+                raise RecommendationError("mock_no_fresh_candidate", "演示食谱在排除近期推荐后已没有新菜，请清除推荐历史或放宽条件；未调用真实 AI。", 422)
+        minimum = 1 if request.maxRecipes == 1 or excluded else 3
+        if len(candidates) < minimum and request.scene != "fridge":
             raise RecommendationError("mock_constraints_unsupported", "演示食谱暂不能满足这些条件，请放宽用时等选项；未调用真实 AI。", 422)
         offset = (self.generation * 3) % len(candidates) if candidates else 0
-        selected = (candidates[offset:] + candidates[:offset])[:3]
+        selected = (candidates[offset:] + candidates[:offset])[:min(request.maxRecipes, 3)]
         self.generation += 1
         return json.dumps({"recipes": [recipe for recipe, _ in selected]}, ensure_ascii=False)

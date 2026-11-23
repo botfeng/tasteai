@@ -53,7 +53,9 @@ class RecommendationService:
             raise RecommendationError("not_configured", "推荐服务配置不完整或尚未授权真实调用。")
         with self.limiter.request_slot():
             repair_code = None
-            for attempt in range(self.settings.max_repairs + 1):
+            # A single-dish replacement is one paid attempt at most: never auto-repair it.
+            attempts = 1 if request.maxRecipes == 1 else self.settings.max_repairs + 1
+            for attempt in range(attempts):
                 # Initial and repair attempts both spend the minute/day budgets.
                 self.limiter.charge_attempt(ip)
                 record("generation_attempt", attempt=attempt + 1)
@@ -79,7 +81,9 @@ class RecommendationService:
                     break
                 except OutputValidationError as error:
                     record("validation_failed", code=error.code, field_path=error.field_path)
-                    if attempt == self.settings.max_repairs:
+                    if error.code == "excluded_recipe" or (request.maxRecipes == 1 and error.code == "duplicate_recipe"):
+                        raise RecommendationError("no_fresh_candidate", "本次生成与近期推荐重复，没有得到新菜；原有推荐已保留，可稍后再试或清除推荐历史。", 422) from None
+                    if attempt == attempts - 1:
                         raise RecommendationError("invalid_model_output", "推荐结果未通过约束校验，未展示任何候选；请复核条件后手动重试。", 502) from None
                     repair_code = error.code
             else:
@@ -104,6 +108,8 @@ class RecommendationService:
             warnings.append("本次未确认匹配的偏好：" + "、".join(sorted(unmatched)) + "；未声称已满足。")
         notice = "Mock 演示：由本地预置食谱规则生成，非真实 AI 推荐。" if mock else "AI 候选已通过当前约束校验，请结合实际食材和设备复核。"
         if request.scene == "fridge" and len(recipes) < 3:
+            notice += f"本次仅返回{len(recipes)}道通过校验的候选，不凑满三道。"
+        if request.scene == "cook" and request.maxRecipes >= 3 and len(recipes) < 3:
             notice += f"本次仅返回{len(recipes)}道通过校验的候选，不凑满三道。"
         if request.scene == "eat_out":
             notice += "仅提供通用点单思路，不对应具体商户、实时供应或真实价格。"

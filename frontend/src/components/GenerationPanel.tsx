@@ -4,10 +4,11 @@ import type { EngineStatus } from '../data/generation'
 import type { useGeneration } from '../data/useGeneration'
 import Icon from './Icon'
 
-export default function GenerationPanel({ generation, label = 'AI 帮我推荐', disabledMessage = '' }: {
+export default function GenerationPanel({ generation, label = 'AI 帮我推荐', disabledMessage = '', excludedRecipeNames = [] }: {
   generation: ReturnType<typeof useGeneration>
   label?: string
   disabledMessage?: string
+  excludedRecipeNames?: string[]
 }) {
   const [status, setStatus] = useState<EngineStatus | null>(null)
   const [connectionError, setConnectionError] = useState('')
@@ -25,7 +26,7 @@ export default function GenerationPanel({ generation, label = 'AI 帮我推荐',
   }, [check])
   const { loading, error, result, generate } = generation
   return <section className="generation-panel" aria-label="AI 菜品生成">
-    <div className="generation-controls"><div><span className="small-eyebrow"><Icon name="spark" size={15} />为这一餐，多想一点</span><p>{connectionError || status?.message || '正在检查生成服务…'}</p>{status?.source === 'mock' && <p className="generation-disclosure">Mock 测试模式，不调用真实模型，不产生 API 费用。</p>}</div><div className="generation-actions"><button type="button" className="primary-button" disabled={loading || !status?.configured || !!disabledMessage} onClick={() => void generate()}><Icon name={loading ? 'clock' : 'spark'} size={18} />{loading ? '正在认真搭配…' : error ? '重试生成' : result ? '重新生成一批' : label}</button>{!loading && <button type="button" className="text-button" onClick={() => setCheck((value) => value + 1)}>检查服务<Icon name="refresh" size={15} /></button>}</div></div>
+    <div className="generation-controls"><div><span className="small-eyebrow"><Icon name="spark" size={15} />为这一餐，多想一点</span><p>{connectionError || status?.message || '正在检查生成服务…'}</p>{status?.source === 'mock' && <p className="generation-disclosure">Mock 测试模式，不调用真实模型，不产生 API 费用。</p>}</div><div className="generation-actions"><button type="button" className="primary-button" disabled={loading || !status?.configured || !!disabledMessage} onClick={() => void generate(excludedRecipeNames)}><Icon name={loading ? 'clock' : 'spark'} size={18} />{loading ? '正在认真搭配…' : error ? '重试生成' : result ? '重新生成一批' : label}</button>{!loading && <button type="button" className="text-button" onClick={() => setCheck((value) => value + 1)}>检查服务<Icon name="refresh" size={15} /></button>}</div></div>
     {disabledMessage && <p className="generation-disclosure">{disabledMessage}</p>}
     {loading && <div className="generation-loading" role="status" aria-live="polite"><span className="generation-progress" /><p>正在组合食材、整理做法并检查限制。请稍候，不必重复点击。</p></div>}
     {error && <p className="generation-error" role="alert">{error}{result ? ' 下方保留的是上一次成功结果。' : ' 下方本地示例不是本次 AI 结果。'}</p>}

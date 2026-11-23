@@ -38,6 +38,7 @@ ERROR_FIELDS = {
     "time_limit": ("estimatedTime",),
     "recipe_count": ("recipes",),
     "duplicate_recipe": ("recipes",),
+    "excluded_recipe": ("recipes",),
 }
 
 
@@ -146,8 +147,13 @@ def validate_recipe(candidate: ModelRecipe, request: RecommendationRequest) -> R
     if request.scene == "fridge":
         reason += "包含已选主要食材。"
     if request.scene != "eat_out":
-        reason += f"预计用时{estimated}分钟。"
-    if matched:
+        reason += f"预计用时{estimated}分钟"
+        if request.timeLimit is not None:
+            reason += f"，不超过{request.timeLimit}分钟的限制"
+        reason += "。"
+    if request.todayTaste and request.todayTaste in matched:
+        reason += f"食材搭配贴合今天想吃的{request.todayTaste}。"
+    elif matched:
         reason += "食材搭配可参考所选偏好：" + "、".join(matched) + "。"
     image = candidate.imageFallbackCategory if candidate.imageFallbackCategory in IMAGE_CATEGORIES else "bowl"
     description = candidate.description or f"{candidate.name}，根据本次条件生成。"
@@ -225,6 +231,7 @@ def validate_output(raw: str, request: RecommendationRequest,
     recipes = []
     names = set()
     fingerprints = set()
+    excluded = {normalize_name(value) for value in request.excludedRecipeNames}
     for index, candidate in enumerate(output.recipes):
         try:
             try:
@@ -236,6 +243,8 @@ def validate_output(raw: str, request: RecommendationRequest,
             name = normalize_name(recipe.name)
             if not name or name in names:
                 fail("duplicate_recipe", ("name",))
+            if name in excluded:
+                fail("excluded_recipe", ("name",))
             fingerprint = (tuple(sorted(item.ingredientId for item in recipe.ingredients)),
                            tuple(normalize_name(step.body) for step in recipe.cookingSteps))
             if recipe.cookingSteps and fingerprint in fingerprints:

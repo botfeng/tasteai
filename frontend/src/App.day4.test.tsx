@@ -101,7 +101,7 @@ function panel() {
 }
 
 async function generateButton() {
-  const button = panel().getByRole('button', { name: /推荐|生成/ })
+  const button = panel().getByRole('button', { name: /推荐|生成|帮我决定/ })
   await waitFor(() => expect(button).toBeEnabled())
   return button
 }
@@ -314,16 +314,15 @@ describe('Day 4 isolation, dedup and request hygiene', () => {
     for (const dish of first.recipes) expect(screen.queryByRole('heading', { name: dish.name })).not.toBeInTheDocument()
   })
 
-  it('does not refetch photos when browsing candidates locally, only on regeneration', async () => {
+  it('requests photos once per generated batch, not on local interaction', async () => {
     const response = responseFor()
-    response.recipes.push(...response.recipes.slice(0, 2).map((recipe, index) => ({ ...recipe, id: `extra-${index}`, name: `${recipe.name}第二组` })))
     generationFetch.mockImplementation(async () => json(response))
     render(<App />)
     await generate()
     await screen.findByRole('heading', { name: response.recipes[0].name })
     await waitFor(() => expect(photosFetch).toHaveBeenCalledTimes(1))
-    fireEvent.click(screen.getByRole('button', { name: '浏览本次候选' }))
-    fireEvent.click(screen.getByRole('button', { name: '浏览本次候选' }))
+    expect(screen.queryByRole('button', { name: '浏览本次候选' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: `收藏${response.recipes[0].name}` }))
     expect(photosFetch).toHaveBeenCalledTimes(1)
     await generate()
     await waitFor(() => expect(photosFetch).toHaveBeenCalledTimes(2))

@@ -30,7 +30,8 @@ class RecommendationRequest(StrictModel):
     timeLimit: int | None = Field(default=None, ge=5, le=180)
     budgetLevel: Literal["any", "economy", "balanced", "treat"] | None = None
     servings: int = Field(default=1, ge=1, le=6)
-    maxRecipes: int = Field(default=5, ge=3, le=5)
+    maxRecipes: int = Field(default=5, ge=1, le=5)
+    excludedRecipeNames: list[ShortText] = Field(default_factory=list, max_length=20)
     strictIngredients: bool = True
     assumeBasics: bool = True
 
@@ -39,6 +40,10 @@ class RecommendationRequest(StrictModel):
         for values in (self.ingredientIds, self.tastePreferences, self.preferredCategories):
             if len(values) != len(set(values)):
                 raise ValueError("duplicate selection")
+        if self.maxRecipes < 3 and self.scene != "cook":
+            raise ValueError("maxRecipes below 3 is cook-only")
+        if self.excludedRecipeNames and self.scene != "cook":
+            raise ValueError("excludedRecipeNames is cook-only")
         if self.scene == "fridge":
             if not self.ingredientIds or any(value not in BY_ID for value in self.ingredientIds):
                 raise ValueError("fridge requires known ingredients")
