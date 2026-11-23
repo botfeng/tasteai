@@ -1,3 +1,4 @@
+import { apiUrl } from './api'
 import { validPhoto } from './generation'
 import type { DishPhoto, GeneratedDish, GeneratedSnapshot, Scene } from './generation'
 
@@ -20,7 +21,7 @@ export async function matchDishPhotos(dishes: GeneratedDish[], scene: Scene, sig
   }
   let value: unknown
   try {
-    const response = await fetch('/api/photos/match', {
+    const response = await fetch(apiUrl('/api/photos/match'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
     })
     if (!response.ok) return {}

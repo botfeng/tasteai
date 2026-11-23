@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: tasteai-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.lock
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --no-proxy-headers
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.12
+      - key: TASTEAI_DEPLOYMENT
+        value: production
+      - key: LLM_MODE
+        value: mock
+      - key: LLM_ALLOW_PAID_CALLS
+        value: 'false'
+      - key: LLM_DAILY_ATTEMPT_LIMIT
+        value: '30'
+      - key: LLM_PER_IP_PER_MINUTE
+        value: '3'
+      - key: LLM_MAX_CONCURRENT
+        value: '1'
+      - key: LLM_MAX_REPAIRS
+        value: '0'
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false

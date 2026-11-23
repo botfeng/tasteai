@@ -1,3 +1,5 @@
+import os
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -21,6 +23,12 @@ def create_app(settings: Settings | None = None, client: RecommendationClient | 
         description="TasteAI Day 4：仅供单进程本地演示；推荐默认关闭，真实 AI 需显式配置与费用授权；菜品示意图使用 Openverse 匿名搜索（CC0/PDM/CC BY），默认启用。",
     )
     settings = settings or Settings.from_env()
+    origins = [value.strip() for value in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if value.strip()]
+    if any(value == "*" or not value.startswith(("https://", "http://localhost:", "http://127.0.0.1:")) or "/" in value.split("://", 1)[1] for value in origins):
+        raise ValueError("CORS_ALLOWED_ORIGINS must contain exact origins without trailing slashes")
+    application.add_middleware(CORSMiddleware, allow_origins=origins,
+                               allow_credentials=False, allow_methods=["GET", "POST"],
+                               allow_headers=["Content-Type"])
     application.state.recommendation_service = RecommendationService(settings, client, limiter)
     application.state.photo_service = photo_service or PhotoService(settings)
 

@@ -1,3 +1,4 @@
+import { apiUrl } from './api'
 import { ingredientCatalog } from './ingredients'
 import type { BudgetBand, Recipe } from './recipes'
 
@@ -150,7 +151,7 @@ export function toRecipe(snapshot: GeneratedSnapshot): Recipe {
 }
 
 export async function fetchEngineStatus(signal: AbortSignal): Promise<EngineStatus> {
-  const response = await fetch('/api/recommendations/status', { signal })
+  const response = await fetch(apiUrl('/api/recommendations/status'), { signal })
   const value: unknown = await response.json()
   if (!response.ok || !object(value) || typeof value.configured !== 'boolean' || !oneOf(value.mode, ['disabled', 'mock', 'openai_compatible']) || !(value.source === null || oneOf(value.source, ['mock', 'ai'])) || !(value.model === null || text(value.model, 200)) || !text(value.message)) throw new Error('暂时无法连接生成服务；本地示例仍可使用。')
   return value as EngineStatus
@@ -159,7 +160,7 @@ export async function fetchEngineStatus(signal: AbortSignal): Promise<EngineStat
 export async function generateRecipes(request: GenerationRequest, signal: AbortSignal): Promise<GenerationResponse> {
   let response: Response
   try {
-    response = await fetch('/api/recommendations/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal })
+    response = await fetch(apiUrl('/api/recommendations/generate'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal })
   } catch (error) {
     if (signal.aborted) throw error
     throw new Error('无法连接生成服务，请检查网络或后端后重试。')

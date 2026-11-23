@@ -1,3 +1,4 @@
+import { apiUrl } from '../data/api'
 import { useEffect, useState } from 'react'
 
 type HealthState = 'checking' | 'connected' | 'unavailable'
@@ -25,7 +26,7 @@ export default function ServiceStatus() {
 
     async function checkHealth() {
       try {
-        const response = await fetch('/api/health', {
+        const response = await fetch(apiUrl('/api/health'), {
           signal: controller.signal,
           cache: 'no-store',
         })
